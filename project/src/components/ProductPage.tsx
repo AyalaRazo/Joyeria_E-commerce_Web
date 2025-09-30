@@ -203,7 +203,7 @@ const ProductPage: React.FC = () => {
     
     try {
       const userData = await supabase.auth.getUser();
-      const userName = userData.data.user?.user_metadata?.full_name || 
+      const userName = userData.data.user?.user_metadata?.name || 
                      user.email?.split('@')[0] || 
                      'Anónimo';
 
@@ -591,7 +591,7 @@ const handleAddToCart = async () => {
                     <div 
                       key={relatedProduct.id} 
                       className="flex-shrink-0 w-64 bg-gray-900 rounded-xl overflow-hidden shadow-lg border border-gray-800 hover:border-yellow-400 transition-colors cursor-pointer"
-                      onClick={() => navigate(`/product/${relatedProduct.id}`)}
+                      onClick={() => navigate(`/producto/${relatedProduct.id}`)}
                     >
                       <div className="h-48 bg-black flex items-center justify-center p-4">
                         <img 

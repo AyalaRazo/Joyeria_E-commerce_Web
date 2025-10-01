@@ -96,7 +96,7 @@ const ProductGrid: React.FC<ProductGridProps> = ({
             <p className="text-gray-500">Pronto tendremos nuevas piezas en esta categoría</p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 xs:grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-4 gap-4 sm:gap-6 lg:gap-8 w-full">
+          <div className="grid grid-cols-1 xs:grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-4 gap-14 sm:gap-8 lg:gap-6 w-full">
             {sortedProducts.map((product) => (
               <div key={product.id} className="w-full h-full flex">
                 <ProductCard

@@ -83,7 +83,7 @@ const Header: React.FC<HeaderProps> = ({
           >
             
             <div>
-              <h1 className="text-sm sm:text-2xl font-bold bg-gradient-to-r from-gray-300 via-gray-400 to-gray-500 bg-clip-text text-transparent">
+              <h1 className="text-lg sm:text-2xl font-bold bg-gradient-to-r from-gray-300 via-gray-400 to-gray-500 bg-clip-text text-transparent">
                 Joyeria
               </h1>
             </div>

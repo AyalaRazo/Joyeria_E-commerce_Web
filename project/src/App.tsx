@@ -198,7 +198,7 @@ function App() {
               category={activeCategory}
               loading={productsLoading}
             />
-            <div className="w-3/4 mx-auto">
+            <div className="lg:w-3/4 mx-auto">
               <NewsletterForm />
             </div>
           </main>

@@ -476,17 +476,19 @@ const handleAddToCart = async () => {
               <span className="text-4xl font-bold text-yellow-300 drop-shadow-sm">
                 {new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(currentPrice)}
               </span>
+
               {product.original_price && product.original_price > currentPrice && (
-                <>
+                <div className="flex flex-col items-start gap-1">
                   <span className="text-2xl text-gray-500 line-through">
                     {new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(product.original_price)}
                   </span>
                   <span className="bg-red-600 text-white px-2 py-1 rounded-md text-sm font-bold">
                     {discountPercentage}% OFF
                   </span>
-                </>
+                </div>
               )}
             </div>
+
             
             {/* Selector de variantes */}
             {product.variants && product.variants.length > 0 && (

@@ -171,7 +171,7 @@ const ProductCard: React.FC<ProductCardProps> = ({ product, onClick, onAddToCart
           <div className="mb-4">
             <label className="block text-gray-400 text-xs mb-1">Modelo:</label>
             <select
-              className="w-full bg-gray-800 text-white rounded p-2 border border-gray-700 text-xs sm:text-sm"
+              className="w-full bg-gray-800 text-white rounded p-4 md:p-2 border border-gray-700 text-xs sm:text-sm"
               value={selectedModel}
               onChange={e => setSelectedModel(e.target.value)}
               onClick={handleSelectChange}

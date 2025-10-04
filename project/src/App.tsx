@@ -20,7 +20,8 @@ import NewsletterForm from './components/NewsletterForm';
 import UnsubscribePage from './pages/UnsubscribePage';
 import AdminPanel from './components/AdminPanel';
 import RequireAuth from './components/RequireAuth';
-import PurchasedProducts from './components/PurchasedProducts';
+import RequireUserAuth from './components/RequireUserAuth';
+import OrdersPage from './components/OrdersPage';
 
 function App() {
   const {
@@ -225,10 +226,11 @@ function App() {
         } />
         
         
-        <Route path="/purchased" element={
-          <RequireAuth>
-            <PurchasedProducts />
-          </RequireAuth>
+        
+        <Route path="/orders" element={
+          <RequireUserAuth>
+            <OrdersPage />
+          </RequireUserAuth>
         } />
         
         <Route path="/admin" element={

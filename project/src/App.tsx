@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { Routes, Route, useNavigate, useLocation } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import Header from './components/Header';
@@ -19,8 +19,9 @@ import CheckoutCancelPage from './pages/Cancel';
 import NewsletterForm from './components/NewsletterForm';
 import UnsubscribePage from './pages/UnsubscribePage';
 import AdminPanel from './components/AdminPanel';
-import RequireAuth from './components/RequireAuth';
-import PurchasedProducts from './components/PurchasedProducts';
+import RequireUserAuth from './components/RequireUserAuth';
+import RequireWorker from './components/RequireWorker';
+import OrdersPage from './components/OrdersPage';
 
 function App() {
   const {
@@ -39,7 +40,6 @@ function App() {
 
   const {
     cartItems,
-    loading: cartLoading,
     addToCart,
     removeFromCart,
     updateQuantity,
@@ -51,22 +51,18 @@ function App() {
   const {
     products,
     categories,
-    loading: productsLoading
+    loading: productsLoading,
+    error: productsError
   } = useProducts();
 
   const [activeCategory, setActiveCategory] = useState('all');
   const [showHero, setShowHero] = useState(true);
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
-  const [lastSelectedCategory, setLastSelectedCategory] = useState<string | null>(null);
 
   const location = useLocation();
   const navigate = useNavigate();
 
-  // Debug para ver cambios en el estado del modal
-  useEffect(() => {
-    console.log('Estado del modal de autenticación:', isAuthOpen);
-  }, [isAuthOpen]);
 
   // Escuchar eventos de cambio de modo de autenticación
   useEffect(() => {
@@ -85,7 +81,6 @@ function App() {
     const savedCategory = localStorage.getItem('selectedCategory');
     if (savedCategory) {
       setActiveCategory(savedCategory);
-      setLastSelectedCategory(savedCategory);
       localStorage.removeItem('selectedCategory');
       
       setTimeout(() => {
@@ -97,7 +92,6 @@ function App() {
 
   const handleCategoryChange = (category: string) => {
     setActiveCategory(category);
-    setLastSelectedCategory(category);
     
     if (location.pathname !== '/') {
       localStorage.setItem('selectedCategory', category);
@@ -128,6 +122,7 @@ function App() {
     console.log('Autenticación requerida - abriendo modal');
     openAuth();
   };
+
 
   const handleAddToCart = async (product: Product, quantity: number = 1, variant?: any) => {
     try {
@@ -179,7 +174,6 @@ function App() {
       <Header
         activeCategory={activeCategory}
         onCategoryChange={handleCategoryChange}
-        products={products}
         onAddToCart={handleAddToCart}
         onCartToggle={handleCartToggle}
         cartItemCount={getCartItemCount()}
@@ -197,6 +191,7 @@ function App() {
               onAddToCart={handleAddToCart}
               category={activeCategory}
               loading={productsLoading}
+              error={productsError}
             />
             <div className="lg:w-3/4 mx-auto">
               <NewsletterForm />
@@ -225,16 +220,17 @@ function App() {
         } />
         
         
-        <Route path="/purchased" element={
-          <RequireAuth>
-            <PurchasedProducts />
-          </RequireAuth>
+        
+        <Route path="/orders" element={
+          <RequireUserAuth>
+            <OrdersPage />
+          </RequireUserAuth>
         } />
         
         <Route path="/admin" element={
-          <RequireAuth>
+          <RequireWorker>
             <AdminPanel />
-          </RequireAuth>
+          </RequireWorker>
         } />
         
         <Route path="/reset-password" element={<ResetPassword />} />

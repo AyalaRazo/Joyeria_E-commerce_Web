@@ -8,6 +8,7 @@ interface ProductGridProps {
   category: string;
   onProductClick?: (product: Product) => void;
   loading?: boolean;
+  error?: string | null;
 }
 
 const ProductGrid: React.FC<ProductGridProps> = ({
@@ -16,6 +17,7 @@ const ProductGrid: React.FC<ProductGridProps> = ({
   category,
   onProductClick,
   loading = false,
+  error = null,
 }) => {
   const getCategoryTitle = (cat: string) => {
     switch (cat) {
@@ -69,6 +71,41 @@ const ProductGrid: React.FC<ProductGridProps> = ({
           
           <div className="flex items-center justify-center py-20">
             <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-gray-300"></div>
+          </div>
+        </div>
+      </section>
+    );
+  }
+
+  if (error) {
+    return (
+      <section className="bg-gradient-to-b from-gray-900 to-black">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="text-center mb-16">
+            <h2 className="text-5xl font-bold mb-6">
+              <span className="bg-gradient-to-r from-gray-300 via-gray-400 to-gray-500 bg-clip-text text-transparent">
+                {getCategoryTitle(category)}
+              </span>
+            </h2>
+            <p className="text-xl text-gray-300 max-w-2xl mx-auto leading-relaxed">
+              {getCategoryDescription(category)}
+            </p>
+          </div>
+          
+          <div className="text-center py-20">
+            <div className="text-6xl mb-4">⚠️</div>
+            <h3 className="text-2xl font-bold text-red-400 mb-4">Error de Conexión</h3>
+            <p className="text-gray-300 mb-6 max-w-2xl mx-auto">
+              {error}
+            </p>
+            <div className="bg-gray-800/50 border border-gray-700 rounded-lg p-6 max-w-2xl mx-auto">
+              <h4 className="text-lg font-semibold text-gray-300 mb-3">Para solucionar este problema:</h4>
+              <ul className="text-left text-gray-400 space-y-2">
+                <li>• Verifica que las variables de entorno de Supabase estén configuradas</li>
+                <li>• Asegúrate de que la base de datos esté funcionando</li>
+                <li>• Revisa la consola del navegador para más detalles</li>
+              </ul>
+            </div>
           </div>
         </div>
       </section>

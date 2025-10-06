@@ -1,15 +1,13 @@
 import React, { useState } from 'react';
-import { ShoppingBag, Search, Menu, Crown, User, LogOut } from 'lucide-react';
+import { ShoppingBag, Search, Menu, Crown, User, LogOut, Settings } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import SearchModal from './SearchModal';
 import { useAuth } from '../hooks/useAuth';
-import { useCart } from '../hooks/useCart';
 import type { Product } from '../types';
 
 interface HeaderProps {
   activeCategory: string;
   onCategoryChange: (category: string) => void;
-  products: Product[];
   onAddToCart: (product: Product) => void;
   onCartToggle: () => void;
   cartItemCount: number;
@@ -21,7 +19,6 @@ interface HeaderProps {
 const Header: React.FC<HeaderProps> = ({ 
   activeCategory, 
   onCategoryChange, 
-  products,
   onAddToCart,
   onCartToggle,
   cartItemCount,
@@ -29,6 +26,7 @@ const Header: React.FC<HeaderProps> = ({
   onLoginClick,
   onLogout
 }) => {
+  const { canAccessAdmin, loading: authLoading } = useAuth();
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -59,13 +57,6 @@ const Header: React.FC<HeaderProps> = ({
       setShowUserMenu(false);
     } catch (error) {
       console.error('Error al cerrar sesión:', error);
-    }
-  };
-
-  const handleExploreCollection = () => {
-    const grid = document.getElementById('product-grid');
-    if (grid) {
-      grid.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
   };
 
@@ -152,16 +143,6 @@ const Header: React.FC<HeaderProps> = ({
                     <div className="py-1">
                       <button
                         onClick={() => {
-                          navigate('/purchased');
-                          setShowUserMenu(false);
-                        }}
-                        className="flex items-center w-full px-4 py-2 text-sm text-gray-300 hover:bg-gray-800 hover:text-white transition-colors"
-                      >
-                        <Crown className="h-4 w-4 mr-2" />
-                        Productos Comprados
-                      </button>
-                      <button
-                        onClick={() => {
                           navigate('/orders');
                           setShowUserMenu(false);
                         }}
@@ -170,6 +151,18 @@ const Header: React.FC<HeaderProps> = ({
                         <Crown className="h-4 w-4 mr-2" />
                         Mis Pedidos
                       </button>
+                      {!authLoading && canAccessAdmin() && (
+                        <button
+                          onClick={() => {
+                            navigate('/admin');
+                            setShowUserMenu(false);
+                          }}
+                          className="flex items-center w-full px-4 py-2 text-sm text-gray-300 hover:bg-gray-800 hover:text-white transition-colors"
+                        >
+                          <Settings className="h-4 w-4 mr-2" />
+                          Panel Admin
+                        </button>
+                      )}
                       <button
                         onClick={handleLogout}
                         className="flex items-center w-full px-4 py-2 text-sm text-gray-300 hover:bg-gray-800 hover:text-white transition-colors"
@@ -186,7 +179,6 @@ const Header: React.FC<HeaderProps> = ({
                 onClick={(e) => {
                   e.preventDefault();
                   e.stopPropagation();
-                  console.log('Abriendo modal de autenticación');
                   onLoginClick();
                 }}
                 className="flex items-center space-x-2 px-4 py-2 text-gray-300 hover:text-white font-medium rounded-lg hover:bg-gray-800 transition-all duration-300"
@@ -238,8 +230,6 @@ const Header: React.FC<HeaderProps> = ({
         <SearchModal
           isOpen={isSearchOpen}
           onClose={() => setIsSearchOpen(false)}
-          products={products}
-          onAddToCart={onAddToCart}
         />
       )}
     </header>

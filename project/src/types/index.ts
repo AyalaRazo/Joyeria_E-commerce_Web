@@ -98,7 +98,8 @@ export type OrderStatus =
   | 'enviado' 
   | 'entregado' 
   | 'cancelado' 
-  | 'reembolsado';
+  | 'reembolsado'
+  | 'devuelto';
 
 export interface OrderItem {
   id: number;
@@ -170,12 +171,33 @@ export interface CartItemWithProduct extends CartItem {
   variant?: ProductVariant;
 }
 
+// Tipos para roles de usuario
+export type UserRole = 'admin' | 'worker' | 'customer';
+
+export interface UserRoleData {
+  user_id: string;
+  role: UserRole;
+}
+
+// Tipos para devoluciones
+export interface Return {
+  id: number;
+  order_id: number;
+  admin_id: string;
+  reason?: string;
+  returned_at: string;
+  items_returned?: any;
+  order?: Order;
+  admin?: User;
+}
+
 // Tipos para la autenticación
 export interface AuthUser {
   id: string;
   email: string;
   name?: string;
   created_at?: string;
+  role?: UserRole;
 }
 
 // Tipos para las respuestas de la API

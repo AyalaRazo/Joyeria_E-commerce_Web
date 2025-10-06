@@ -52,8 +52,6 @@ const ProductCard: React.FC<ProductCardProps> = ({ product, onClick, onAddToCart
     e.preventDefault();
     e.stopPropagation();
     
-    console.log('ProductCard clicked:', product.id, product.name);
-    
     // Navegación directa sin condiciones
     console.log('Navigating to:', `/producto/${product.id}`);
     navigate(`/producto/${product.id}`);

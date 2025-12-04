@@ -7,6 +7,9 @@ const Success: React.FC = () => {
   const { clearCart } = useCart();
 
   useEffect(() => {
+    // Scroll al principio al cargar
+    window.scrollTo(0, 0);
+    
     // Limpiar el carrito cuando se llegue a la página de éxito
     const clearCartAndShow = async () => {
       try {
@@ -18,6 +21,16 @@ const Success: React.FC = () => {
     };
 
     clearCartAndShow();
+
+    // Meta Ads: Purchase
+    try {
+      if (typeof window !== 'undefined' && (window as any).fbq) {
+        (window as any).fbq('track', 'Purchase', {
+          currency: 'MXN',
+          value: undefined, // Si se requiere, pasar el total desde query/estado
+        });
+      }
+    } catch {}
   }, [clearCart]);
 
   return (

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { X, Search, SlidersHorizontal, Star, Tag, ShoppingBag } from 'lucide-react';
+import { X, Search, SlidersHorizontal, Plus, Star, Tag, ShoppingBag } from 'lucide-react';
 import { Product } from '../types/index';
 import { useNavigate } from 'react-router-dom';
 import { useProducts } from '../hooks/useProducts';
@@ -208,18 +208,17 @@ const SearchModal: React.FC<SearchModalProps> = ({
           {/* Badges */}
           <div className="absolute top-2 left-2 z-10 flex flex-col space-y-1">
             {isNew && (
-              <span className="bg-gradient-to-r from-green-500 to-green-600 text-white px-2 py-0.5 rounded-full text-xs font-bold">
-                NUEVO
+              <span className="bg-gradient-to-r from-green-500 to-green-600 text-white px-2 py-0.5 rounded-full text-xs font-bold flex items-center justify-center">
+                <Plus className="h-3.5 w-3.5" fill="currentColor" />
               </span>
             )}
             {isFeatured && (
-              <span className="bg-gradient-to-r from-gray-300 to-gray-500 text-black px-2 py-0.5 rounded-full text-xs font-bold flex items-center space-x-1">
+              <span className="bg-gradient-to-r from-gray-300 to-gray-500 text-black px-2 py-0.5 rounded-full text-xs font-bold flex items-center justify-center">
                 <Star className="h-3 w-3" fill="currentColor" />
-                <span>DESTACADO</span>
               </span>
             )}
             {hasDiscount && (
-              <span className="bg-gradient-to-r from-red-500 to-red-600 text-white px-2 py-0.5 rounded-full text-xs font-bold">
+              <span className="bg-gradient-to-r from-red-500 to-red-600 text-white px-2 py-0.5 rounded-full text-xs font-bold flex items-center justify-center">
                 -{discountPercentage}%
               </span>
             )}
@@ -381,7 +380,7 @@ const SearchModal: React.FC<SearchModalProps> = ({
                       <input
                         type="range"
                         min="0"
-                        max="10000"
+                        max="100000"
                         step="100"
                         value={priceRange.max}
                         onChange={(e) => setPriceRange({...priceRange, max: parseInt(e.target.value)})}

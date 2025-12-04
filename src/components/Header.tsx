@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ShoppingBag, Search, Menu, Crown, User, LogOut, Settings } from 'lucide-react';
+import { ShoppingBag, Search, Menu, Package, User, LogOut, Settings } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import SearchModal from './SearchModal';
 import { useAuth } from '../hooks/useAuth';
@@ -42,7 +42,23 @@ const Header: React.FC<HeaderProps> = ({
     { id: 'earrings', name: 'Pendientes' }
   ];
 
+  const trackCategoryView = (categoryId: string) => {
+    if (categoryId === 'all') return;
+    const categoryName = categories.find(c => c.id === categoryId)?.name || categoryId;
+    try {
+      if (typeof window !== 'undefined' && (window as any).fbq) {
+        (window as any).fbq('track', 'PageView', {
+          content_category: categoryName,
+          category_id: categoryId,
+        });
+      }
+    } catch (error) {
+      console.warn('Meta PageView tracking falló:', error);
+    }
+  };
+
   const handleCategoryClick = (categoryId: string) => {
+    trackCategoryView(categoryId);
     if (!isHome) {
       localStorage.setItem('selectedCategory', categoryId);
       navigate('/');
@@ -148,9 +164,19 @@ const Header: React.FC<HeaderProps> = ({
                         }}
                         className="flex items-center w-full px-4 py-2 text-sm text-gray-300 hover:bg-gray-800 hover:text-white transition-colors"
                       >
-                        <Crown className="h-4 w-4 mr-2" />
+                        <Package className="h-4 w-4 mr-2" />
                         Mis Pedidos
                       </button>
+                    <button
+                      onClick={() => {
+                        navigate('/addresses');
+                        setShowUserMenu(false);
+                      }}
+                      className="flex items-center w-full px-4 py-2 text-sm text-gray-300 hover:bg-gray-800 hover:text-white transition-colors"
+                    >
+                      <User className="h-4 w-4 mr-2" />
+                      Mis Direcciones
+                    </button>
                       {!authLoading && canAccessAdmin() && (
                         <button
                           onClick={() => {

@@ -5,9 +5,15 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { BrowserRouter } from 'react-router-dom';
 import './index.css';
 
-// Script del Meta Pixel
 const loadFacebookPixel = () => {
   const pixelId = import.meta.env.VITE_FB_PIXEL_ID;
+  
+  if (!pixelId) {
+    console.warn('Facebook Pixel ID no encontrado');
+    return;
+  }
+
+  // Script principal
   const script = document.createElement('script');
   script.innerHTML = `
     !function(f,b,e,v,n,t,s)
@@ -22,12 +28,20 @@ const loadFacebookPixel = () => {
     fbq('track', 'PageView');
   `;
   document.head.appendChild(script);
+
+  // Fallback para usuarios sin JavaScript
+  const noscript = document.createElement('noscript');
+  noscript.innerHTML = `
+    <img height="1" width="1" style="display:none" 
+      src="https://www.facebook.com/tr?id=${pixelId}&ev=PageView&noscript=1" 
+    />
+  `;
+  document.body.appendChild(noscript);
 };
 
-//${process.env.NEXT_PUBLIC_FB_PIXEL_ID} - cambiar lo el id del pixel 
 const queryClient = new QueryClient();
 
-// Cargar el Pixel solo en el cliente (no en SSR)
+// Cargar el Pixel solo en el cliente
 if (typeof window !== 'undefined') {
   loadFacebookPixel();
 }

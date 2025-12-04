@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 
@@ -10,6 +10,11 @@ const ResetPassword = () => {
   const [success, setSuccess] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
+
+  // Scroll al principio al cargar
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, []);
 
   // Soportar parámetros en search o en hash
   let params = new URLSearchParams(location.search);

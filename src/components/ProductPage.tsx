@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Star, ArrowLeft, Heart, Share2, ShoppingBag, ZoomIn, ZoomOut, Move } from 'lucide-react';
+import { Star, ArrowLeft, Heart } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { useCart } from '../hooks/useCart';
 import { supabase } from '../lib/supabase';
@@ -11,7 +11,7 @@ const ProductPage: React.FC = () => {
   const navigate = useNavigate();
   const topRef = useRef<HTMLDivElement>(null);
   const { user } = useAuth();
-  const { addToCart, cartItems } = useCart();
+  const { addToCart } = useCart();
   
   // Estados del producto
   const [product, setProduct] = useState<Product | null>(null);
@@ -20,7 +20,6 @@ const ProductPage: React.FC = () => {
   const [selectedSize, setSelectedSize] = useState('');
   const [quantity, setQuantity] = useState(1);
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
-  const [showImageModal, setShowImageModal] = useState(false);
   const [isWishlisted, setIsWishlisted] = useState(false);
   
   // Estados para reseñas
@@ -28,24 +27,13 @@ const ProductPage: React.FC = () => {
   const [reviewForm, setReviewForm] = useState({ rating: 5, comment: '' });
   const [reviewSubmitting, setReviewSubmitting] = useState(false);
   const [reviewPermission, setReviewPermission] = useState<'checking' | 'can-review' | 'already-reviewed' | 'not-purchased'>('not-purchased');
-  const [showReviewForm, setShowReviewForm] = useState(false);
 
   // Estados para productos relacionados
   const [relatedProducts, setRelatedProducts] = useState<Product[]>([]);
-  const [loadingRelated, setLoadingRelated] = useState(false);
-
-  // Estados para el zoom de imagen
-  const [zoomLevel, setZoomLevel] = useState(1);
-  const [isDragging, setIsDragging] = useState(false);
-  const [position, setPosition] = useState({ x: 0, y: 0 });
-  const [startPos, setStartPos] = useState({ x: 0, y: 0 });
-  const imageRef = useRef<HTMLImageElement>(null);
 
   // Scroll al principio al cargar
   useEffect(() => {
-    if (topRef.current) {
-      topRef.current.scrollIntoView({ behavior: 'smooth' });
-    }
+    window.scrollTo(0, 0);
   }, [id]);
 
   // Cargar producto y datos relacionados
@@ -76,9 +64,23 @@ const ProductPage: React.FC = () => {
 
         setProduct(productData);
         
-        // Resetear selección de variantes
-        setSelectedModel('');
-        setSelectedSize('');
+        // Resetear selección de variantes y establecer valores por defecto
+        // Si hay variantes, no seleccionar ninguna por defecto para mostrar el producto principal
+        const defaultModel = '';
+        setSelectedModel(defaultModel);
+        
+        // Si hay un modelo seleccionado, obtener los tamaños disponibles
+        if (defaultModel) {
+          const sizes = productData.variants
+            ?.filter((v: ProductVariant) => v.model === defaultModel)
+            .map((v: ProductVariant) => v.size)
+            .filter(Boolean) || [];
+          const defaultSize = sizes.length > 0 ? (sizes[0] as string || '') : '';
+          setSelectedSize(defaultSize);
+        } else {
+          setSelectedSize('');
+        }
+        
         setCurrentImageIndex(0);
 
         // Cargar reseñas
@@ -106,11 +108,26 @@ const ProductPage: React.FC = () => {
     fetchProduct();
   }, [id, user]);
 
+  // Meta Ads: ViewContent cuando el producto esté disponible
+  useEffect(() => {
+    if (product) {
+      try {
+        if (typeof window !== 'undefined' && (window as any).fbq) {
+          (window as any).fbq('track', 'ViewContent', {
+            content_ids: [product.id],
+            content_type: 'product',
+            value: product.price,
+            currency: 'MXN',
+          });
+        }
+      } catch {}
+    }
+  }, [product]);
+
   // Cargar productos relacionados
   useEffect(() => {
     if (product?.category_id) {
       const fetchRelatedProducts = async () => {
-        setLoadingRelated(true);
         try {
           const { data, error } = await supabase
             .from('products')
@@ -128,8 +145,6 @@ const ProductPage: React.FC = () => {
           setRelatedProducts(data || []);
         } catch (error) {
           console.error('Error loading related products:', error);
-        } finally {
-          setLoadingRelated(false);
         }
       };
 
@@ -185,7 +200,6 @@ const ProductPage: React.FC = () => {
 
       if (orderItems && orderItems.length > 0) {
         setReviewPermission('can-review');
-        setShowReviewForm(true);
       } else {
         setReviewPermission('not-purchased');
       }
@@ -223,7 +237,6 @@ const ProductPage: React.FC = () => {
       setReviews([...reviews, data[0]]);
       setReviewForm({ rating: 5, comment: '' });
       setReviewPermission('already-reviewed');
-      setShowReviewForm(false);
     } catch (error) {
       console.error('Error submitting review:', error);
     } finally {
@@ -270,97 +283,58 @@ const ProductPage: React.FC = () => {
     return productImages;
   };
 
-  // Modifica la función handleAddToCart en ProductPage.tsx
-const handleAddToCart = async () => {
-  if (!product) return;
+  const handleAddToCart = async () => {
+    if (!product) return;
 
-  try {
-    const selectedVariant = product.variants?.find(v =>
-      (v.model === selectedModel || !v.model) &&
-      (v.size === selectedSize || !v.size)
-    );
+    try {
+      const selectedVariant = product.variants?.find(v =>
+        (v.model === selectedModel || !v.model) &&
+        (v.size === selectedSize || !v.size)
+      );
 
-    const stock = selectedVariant?.stock ?? product.stock ?? 0;
-    if (stock <= 0) {
-      throw new Error('Este producto está agotado');
+      const stock = selectedVariant?.stock ?? product.stock ?? 0;
+      if (stock <= 0) {
+        throw new Error('Este producto está agotado');
+      }
+
+      // Usar el hook addToCart que ya maneja la lógica de agrupación
+      await addToCart(product, quantity, selectedVariant);
+
+      // Meta Ads: AddToCart
+      try {
+        if (typeof window !== 'undefined' && (window as any).fbq) {
+          (window as any).fbq('track', 'AddToCart', {
+            content_ids: [product.id],
+            content_type: 'product',
+            value: selectedVariant?.price ?? product.price,
+            currency: 'MXN',
+            num_items: quantity,
+          });
+        }
+      } catch {}
+
+      // Disparar evento personalizado para actualizar el carrito
+      const cartUpdateEvent = new CustomEvent('cart-updated', { 
+        detail: { action: 'add', productId: product.id, quantity } 
+      });
+      window.dispatchEvent(cartUpdateEvent);
+
+      // Feedback visual
+      const button = document.getElementById('add-to-cart-button');
+      if (button) {
+        button.textContent = '✓ Añadido';
+        setTimeout(() => {
+          button.textContent = stock > 0 ? 'AÑADIR AL CARRITO' : 'AGOTADO';
+        }, 2000);
+      }
+    } catch (error) {
+      console.error('Error al añadir al carrito:', error);
+      if (error instanceof Error && error.message.includes('autenticado')) {
+        navigate('/login', { state: { from: window.location.pathname } });
+      }
     }
-
-    // Crear objeto para el carrito compatible con el tipo CartItem
-    const cartItem = {
-      id: selectedVariant?.id || product.id,
-      product_id: product.id,
-      variant_id: selectedVariant?.id || null,
-      quantity,
-      price: selectedVariant?.price ?? product.price,
-      added_at: new Date().toISOString(),
-      product: {
-        id: product.id,
-        name: product.name,
-        price: selectedVariant?.price ?? product.price,
-        original_price: product.original_price,
-        image: selectedVariant?.image || product.image,
-        description: product.description,
-        material: product.material,
-        in_stock: product.in_stock,
-        category_id: product.category_id
-      },
-      variant: selectedVariant ? {
-        id: selectedVariant.id,
-        name: selectedVariant.name,
-        price: selectedVariant.price,
-        image: selectedVariant.image,
-        model: selectedVariant.model,
-        size: selectedVariant.size
-      } : undefined
-    };
-
-    // 1. Agrega el producto al carrito (hook)
-    await addToCart(product, quantity, selectedVariant);
-
-    // 2. Actualiza el campo items (json) en la tabla carts
-    // cartItems ya está actualizado por el hook
-    const { data: { user } } = await supabase.auth.getUser();
-    if (user) {
-      await supabase
-        .from('carts')
-        .upsert({
-          user_id: user.id,
-          updated_at: new Date().toISOString(),
-          items: [...cartItems, cartItem] // items actualizado
-        });
-    }
-
-    // Disparar evento personalizado para actualizar el carrito
-    const cartUpdateEvent = new CustomEvent('cart-updated', { 
-      detail: { action: 'add', productId: product.id, quantity } 
-    });
-    window.dispatchEvent(cartUpdateEvent);
-
-    // Feedback visual
-    const button = document.getElementById('add-to-cart-button');
-    if (button) {
-      button.textContent = '✓ Añadido';
-      setTimeout(() => {
-        button.textContent = stock > 0 ? 'AÑADIR AL CARRITO' : 'AGOTADO';
-      }, 2000);
-    }
-  } catch (error) {
-    console.error('Error al añadir al carrito:', error);
-    if (error instanceof Error && error.message.includes('autenticado')) {
-      navigate('/login', { state: { from: window.location.pathname } });
-    }
-  }
-};
-
-  const nextImage = () => {
-    const images = getAllImages();
-    setCurrentImageIndex((prev) => (prev + 1) % images.length);
   };
 
-  const prevImage = () => {
-    const images = getAllImages();
-    setCurrentImageIndex((prev) => (prev - 1 + images.length) % images.length);
-  };
 
   if (loading) {
     return (
@@ -398,6 +372,45 @@ const handleAddToCart = async () => {
     ? Math.round(((product.original_price - currentPrice) / product.original_price) * 100)
     : 0;
   const stock = selectedVariant?.stock ?? product?.stock ?? 0;
+
+  // Widget de estimación de entrega (sin dependencias externas)
+  const addBusinessDays = (date: Date, days: number) => {
+    const result = new Date(date);
+    let added = 0;
+    while (added < days) {
+      result.setDate(result.getDate() + 1);
+      const day = result.getDay();
+      if (day !== 0 && day !== 6) added++;
+    }
+    return result;
+  };
+  const getDeliveryEstimate = (now = new Date(), cutoffHour = 14) => {
+    const handlingDays = 1;
+    const shippingMin = 3;
+    const shippingMax = 5;
+    const orderDate = now.getHours() >= cutoffHour ? addBusinessDays(now, 1) : now;
+    const shipDate = addBusinessDays(orderDate, handlingDays);
+    const minDate = addBusinessDays(shipDate, shippingMin);
+    const maxDate = addBusinessDays(shipDate, shippingMax);
+    const format = (d: Date) => d.toLocaleDateString('es-MX', { weekday: 'short', day: 'numeric', month: 'short' });
+    return { shipDate: format(shipDate), range: `${format(minDate)} – ${format(maxDate)}` };
+  };
+  const { shipDate, range } = getDeliveryEstimate();
+
+  const shippingTimeline = [
+    {
+      title: '1. Cómpralo ahora',
+      detail: 'Confirma tu pedido hoy mismo para asegurar disponibilidad.',
+    },
+    {
+      title: `2. Se envía ${shipDate}`,
+      detail: 'Preparamos y despachamos tu joya antes de las 2 p.m.',
+    },
+    {
+      title: `3. Recíbelo entre ${range}`,
+      detail: 'Ventana estimada de entrega con nuestro envío asegurado.',
+    },
+  ];
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-black via-gray-900 to-black" ref={topRef}>
@@ -455,8 +468,7 @@ const handleAddToCart = async () => {
               </div>
             )}
             <div 
-              className="w-full max-w-md h-[28rem] flex items-center justify-center rounded-2xl shadow-2xl border-2 border-gray-800 bg-black mb-6 p-4 cursor-zoom-in"
-              onClick={() => setShowImageModal(true)}
+              className="w-full max-w-md h-[28rem] flex items-center justify-center rounded-2xl shadow-2xl border-2 border-gray-800 bg-black mb-6 p-4"
             >
               <img
                 src={currentImage}
@@ -489,6 +501,53 @@ const handleAddToCart = async () => {
               )}
             </div>
 
+            {/* Widgets de optimización de conversiones */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+              {/* Widget de envío gratis */}
+              <div className="bg-gradient-to-r from-green-900/30 to-green-800/30 border border-green-500/30 rounded-lg p-4 text-center">
+                <div className="text-green-400 text-2xl mb-2">🚚</div>
+                <h4 className="text-green-300 font-semibold text-sm mb-1">Envío Gratis</h4>
+                <p className="text-green-200 text-xs">A partir de $5,000 MXN</p>
+              </div>
+
+              {/* Widget de garantía */}
+              {product.has_warranty && (
+                <div className="bg-gradient-to-r from-blue-900/30 to-blue-800/30 border border-blue-500/30 rounded-lg p-4 text-center">
+                  <div className="text-blue-400 text-2xl mb-2">🛡️</div>
+                  <h4 className="text-blue-300 font-semibold text-sm mb-1">Garantía</h4>
+                  <p className="text-blue-200 text-xs">
+                    {product.warranty_period} {product.warranty_unit}
+                    {product.warranty_description && (
+                      <span className="block mt-1 text-xs opacity-80">{product.warranty_description}</span>
+                    )}
+                  </p>
+                </div>
+              )}
+
+              {/* Widget de devoluciones */}
+              <div className="bg-gradient-to-r from-purple-900/30 to-purple-800/30 border border-purple-500/30 rounded-lg p-4 text-center">
+                <div className="text-purple-400 text-2xl mb-2">↩️</div>
+                <h4 className="text-purple-300 font-semibold text-sm mb-1">Devoluciones</h4>
+                <p className="text-purple-200 text-xs">Hasta 1 mes después de recibir</p>
+              </div>
+            </div>
+
+            {/* Widget de estimación de entrega */}
+            <div className="mb-6 bg-gray-800/40 border border-gray-700 rounded-lg p-4">
+              <div className="space-y-3">
+                {shippingTimeline.map((step, index) => (
+                  <div key={step.title} className="flex items-start space-x-3">
+                    <div className="h-8 w-8 rounded-full bg-yellow-500/10 text-yellow-400 flex items-center justify-center font-bold text-sm border border-yellow-500/40">
+                      {index + 1}
+                    </div>
+                    <div>
+                      <p className="text-white text-sm font-semibold">{step.title}</p>
+                      <p className="text-gray-300 text-xs">{step.detail}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
             
             {/* Selector de variantes */}
             {product.variants && product.variants.length > 0 && (
@@ -508,6 +567,7 @@ const handleAddToCart = async () => {
                         setSelectedSize(sizes[0] || '');
                       }}
                     >
+                      <option value="">Producto Principal</option>
                       {[...new Set(product.variants.map((v: ProductVariant) => v.model).filter(Boolean))].map(model => (
                         <option key={model} value={model}>{model}</option>
                       ))}

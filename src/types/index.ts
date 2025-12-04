@@ -27,6 +27,10 @@ export interface Product {
   updated_at?: string;
   category_id: number;
   stock?: number;
+  has_warranty?: boolean;
+  warranty_period?: number;
+  warranty_unit?: string;
+  warranty_description?: string;
   category?: Category;
   variants?: ProductVariant[];
   images?: ProductImage[];
@@ -87,19 +91,30 @@ export interface Order {
   created_at?: string;
   tracking_code?: string;
   updated_at?: string;
+  is_submitted?: boolean;
+  submitted_at?: string;
+  courier_id?: number;
+  return_status?: string;
   order_items?: OrderItem[];
-  addresses?: Address[];
+  // Nueva relación de envío
+  shipping_address_id?: number | null;
+  shipping_snapshot?: any | null;
   user?: User;
+  courier?: Courier;
 }
 
 export type OrderStatus = 
   | 'pendiente' 
+  | 'pagado'
   | 'procesando' 
   | 'enviado' 
   | 'entregado' 
   | 'cancelado' 
   | 'reembolsado'
-  | 'devuelto';
+  | 'devuelto'
+  | 'parcialmente_devuelto'
+  | 'disputa'
+  | 'reserved';
 
 export interface OrderItem {
   id: number;
@@ -112,19 +127,30 @@ export interface OrderItem {
   variant?: ProductVariant;
 }
 
-export interface Address {
+// Nuevo esquema de direcciones de usuario (user_addresses)
+export interface UserAddress {
   id: number;
-  user_id?: string;
+  user_id: string;
+  label?: string; // Casa, Oficina, etc.
   name?: string;
-  address_line1?: string;
+  phone?: string;
+  address_line1: string;
   address_line2?: string;
-  city?: string;
+  city: string;
   state?: string;
   postal_code?: string;
-  country?: string;
-  phone?: string;
+  country?: string; // MX por defecto
+  is_default?: boolean;
   created_at?: string;
-  order_id?: number;
+  updated_at?: string;
+}
+
+export interface Courier {
+  id: number;
+  name: string;
+  url: string;
+  logo?: string;
+  created_at?: string;
 }
 
 export interface Review {
@@ -184,6 +210,7 @@ export interface Return {
   id: number;
   order_id: number;
   admin_id: string;
+  name_admin?: string;
   reason?: string;
   returned_at: string;
   items_returned?: any;
@@ -210,4 +237,60 @@ export interface PaginatedResponse<T> {
   data: T[];
   count: number;
   error: string | null;
+}
+
+// Tipos para el dashboard
+export interface SalesSummary {
+  date: string;
+  total_orders: number;
+  total_sales: number;
+  avg_order_value: number;
+  unique_customers: number;
+}
+
+export interface SalesFinancial {
+  date: string;
+  total_orders: number;
+  total_sales: number;
+  total_returns: number;
+  total_platform_fee: number;
+  total_jeweler_earnings: number;
+}
+
+export interface OrderDetailed {
+  order_id: number;
+  user_id: string;
+  total: number;
+  status: string;
+  tracking_code?: string;
+  created_at: string;
+  updated_at: string;
+  return_status: string;
+  is_submitted: boolean;
+  submitted_at?: string;
+  courier_id?: number;
+  courier_name?: string;
+  courier_url?: string;
+  courier_logo?: string;
+  shipping_city?: string;
+  shipping_state?: string;
+  shipping_country?: string;
+}
+
+export interface CourierPerformance {
+  courier_id: number;
+  courier_name: string;
+  total_orders: number;
+  total_sales: number;
+  total_returns: number;
+  return_rate_percentage: number;
+}
+
+export interface ShippingSummary {
+  courier_name: string;
+  total_shipments: number;
+  shipped_orders: number;
+  pending_orders: number;
+  delivered_orders: number;
+  returns_related: number;
 }

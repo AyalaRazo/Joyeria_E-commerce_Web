@@ -1,5 +1,6 @@
 import React from 'react';
-import { Crown, Mail, Phone, MapPin, Instagram, Facebook, Twitter } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { Mail, Phone, MapPin, Instagram, Facebook } from 'lucide-react';
 
 const Footer: React.FC = () => {
   return (
@@ -37,12 +38,17 @@ const Footer: React.FC = () => {
           <div>
             <h3 className="text-lg font-bold text-white mb-6">Enlaces Rápidos</h3>
             <ul className="space-y-3">
-              {['Sobre Nosotros', 'Colecciones', 'Personalización', 'Cuidado de Joyas', 'Garantía'].map((link) => (
-                <li key={link}>
-                  <a href="#" className="text-gray-400 hover:text-gray-300 transition-colors duration-300 flex items-center group">
+              {[
+                { label: 'Sobre Nosotros', to: '/sobre-nosotros' },
+                { label: 'Factura tu Compra', to: '/factura-tu-compra' },
+                { label: 'Cuidado de Joyas', to: '/cuidado-de-joyas' },
+                { label: 'Garantía', to: '/garantia' },
+              ].map(link => (
+                <li key={link.to}>
+                  <Link to={link.to} className="text-gray-400 hover:text-gray-300 transition-colors duration-300 flex items-center group">
                     <span className="w-2 h-2 bg-gray-300 rounded-full mr-3 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></span>
-                    {link}
-                  </a>
+                    {link.label}
+                  </Link>
                 </li>
               ))}
             </ul>
@@ -82,9 +88,9 @@ const Footer: React.FC = () => {
               © 2025 Joyeria creada por Julio Ayala Razo. Todos los derechos reservados.
             </p>
             <div className="flex space-x-6 text-sm text-gray-400">
-              <a href="#" className="hover:text-gray-300 transition-colors duration-300">Política de Privacidad</a>
-              <a href="#" className="hover:text-gray-300 transition-colors duration-300">Términos de Servicio</a>
-              <a href="#" className="hover:text-gray-300 transition-colors duration-300">Devoluciones</a>
+              <Link to="/privacidad" className="hover:text-gray-300 transition-colors duration-300">Política de Privacidad</Link>
+              <Link to="/terminos" className="hover:text-gray-300 transition-colors duration-300">Términos de Servicio</Link>
+              <Link to="/devoluciones" className="hover:text-gray-300 transition-colors duration-300">Devoluciones</Link>
             </div>
           </div>
         </div>

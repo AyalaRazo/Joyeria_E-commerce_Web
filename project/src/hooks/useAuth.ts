@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
-import type { User as SupabaseUser } from '@supabase/supabase-js';
+import type { User as SupabaseUser, RealtimeChannel } from '@supabase/supabase-js';
 import type { AuthUser, UserRole } from '../types';
 
 export const useAuth = () => {
@@ -9,101 +9,245 @@ export const useAuth = () => {
   const [loading, setLoading] = useState(true);
   const [authMode, setAuthMode] = useState<'login' | 'register' | 'forgot-password'>('login');
 
-  const updateUser = async (supabaseUser: SupabaseUser | null) => {
+  // Refs para control
+  const mountedRef = useRef(true);
+  const roleChannelRef = useRef<RealtimeChannel | null>(null);
+
+  // --------------- LOAD ROLE ----------------
+  const loadUserRole = useCallback(async (userId: string, forceRefresh = false): Promise<UserRole> => {
+    if (!mountedRef.current) return 'customer';
+
+    try {
+      console.log('🔄 Cargando rol para:', userId);
+      
+      // PRIMERO intentar desde cache (a menos que forceRefresh sea true)
+      const cacheKey = `user_role_${userId}`;
+      
+      if (!forceRefresh) {
+        const cachedRole = localStorage.getItem(cacheKey);
+        if (cachedRole) {
+          console.log('📦 Rol desde cache:', cachedRole);
+          return cachedRole as UserRole;
+        }
+      }
+
+      // LUEGO intentar desde BD
+      const { data, error } = await supabase
+        .from('user_roles')
+        .select('role')
+        .eq('user_id', userId)
+        .maybeSingle();
+
+      if (error) {
+        console.warn('⚠️ Error cargando rol:', error);
+        return 'customer';
+      }
+
+      const userRole = (data?.role as UserRole) || 'customer';
+      console.log('✅ Rol desde BD:', userRole);
+      
+      // Guardar en cache
+      localStorage.setItem(cacheKey, userRole);
+      
+      return userRole;
+    } catch (error) {
+      console.warn('❌ Error cargando rol:', error);
+      return 'customer';
+    }
+  }, []);
+
+  // --------------- CLEAR USER CACHE ----------------
+  const clearUserRoleCache = (userId: string) => {
+    const cacheKey = `user_role_${userId}`;
+    localStorage.removeItem(cacheKey);
+    console.log('🧹 Cache limpiado para usuario:', userId);
+  };
+
+  // --------------- UPDATE USER ----------------
+  const updateUser = useCallback(async (supabaseUser: SupabaseUser | null, forceRefresh = false) => {
+    if (!mountedRef.current) return;
+
     if (!supabaseUser) {
       setUser(null);
       setLoading(false);
       return;
     }
-  
-    // Obtener el rol del usuario desde user_roles
-    let userRole: UserRole = 'customer'; // Valor por defecto
-    
-    try {      
-      const timeoutPromise = new Promise((_, reject) => {
-        setTimeout(() => reject(new Error('Timeout obteniendo rol')), 3000);
+
+    try {
+      const userRole = await loadUserRole(supabaseUser.id, forceRefresh);
+
+      const authUser: AuthUser = {
+        id: supabaseUser.id,
+        name: supabaseUser.user_metadata?.name || supabaseUser.email?.split('@')[0] || 'Usuario',
+        email: supabaseUser.email || '',
+        created_at: supabaseUser.created_at,
+        role: userRole,
+      };
+
+      console.log('✅ Usuario actualizado:', { 
+        id: authUser.id, 
+        name: authUser.name, 
+        role: authUser.role 
       });
       
-      const { data: roleData, error } = await Promise.race([
-        supabase
-          .from('user_roles')
-          .select('role')
-          .eq('user_id', supabaseUser.id)
-          .single(),
-        timeoutPromise
-      ]) as any;
-      
-      if (error) {
-        // Fallback: mantener el valor por defecto 'customer'
-        console.warn('Error obteniendo rol, usando valor por defecto:', error);
-      } else if (roleData && roleData.role) {
-        userRole = roleData.role as UserRole;
-      } else {
-        // No hay rol en la base de datos, usar valor por defecto
-        console.warn('No se encontró rol en BD, usando valor por defecto');
-        
-        // Intentar insertar el rol por defecto en la base de datos para futuras consultas
-        try {
-          await supabase
-            .from('user_roles')
-            .insert({ user_id: supabaseUser.id, role: userRole });
-        } catch (insertError) {
-          console.warn('Error insertando rol por defecto:', insertError);
-        }
-      }
-    } catch (error) {
-      // Fallback: mantener el valor por defecto 'customer'
-      console.warn('Error general obteniendo rol, usando valor por defecto:', error);
-    }
-  
-    setUser({
-      id: supabaseUser.id,
-      name: supabaseUser.user_metadata?.name || supabaseUser.email?.split('@')[0] || 'Usuario',
-      email: supabaseUser.email || '',
-      created_at: supabaseUser.created_at,
-      role: userRole
-    });
-    setLoading(false);
-  };
+      setUser(authUser);
 
+    } catch (error) {
+      console.error('💥 Error en updateUser:', error);
+      // Fallback seguro
+      const fallbackUser: AuthUser = {
+        id: supabaseUser.id,
+        name: supabaseUser.user_metadata?.name || supabaseUser.email?.split('@')[0] || 'Usuario',
+        email: supabaseUser.email || '',
+        created_at: supabaseUser.created_at,
+        role: 'customer',
+      };
+      setUser(fallbackUser);
+    } finally {
+      if (mountedRef.current) {
+        setLoading(false);
+      }
+    }
+  }, [loadUserRole]);
+
+  // --------------- SETUP ROLE SUBSCRIPTION ----------------
+  const setupRoleSubscription = useCallback((userId: string) => {
+    // Limpiar suscripción anterior
+    if (roleChannelRef.current) {
+      supabase.removeChannel(roleChannelRef.current);
+      roleChannelRef.current = null;
+    }
+
+    console.log('🔗 Configurando suscripción de rol para:', userId);
+
+    // Suscribirse a cambios en user_roles para este usuario
+    const channel = supabase
+      .channel(`user-role-${userId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*', // UPDATE, INSERT
+          schema: 'public',
+          table: 'user_roles',
+          filter: `user_id=eq.${userId}`
+        },
+        async (payload) => {
+          console.log('🔄 Cambio de rol detectado:', payload);
+          
+          if (!mountedRef.current) return;
+
+          const newRole = payload.new.role as UserRole;
+          console.log('🎯 Nuevo rol recibido:', newRole);
+
+          // Actualizar cache
+          localStorage.setItem(`user_role_${userId}`, newRole);
+
+          // Actualizar estado del usuario
+          setUser(prev => {
+            if (!prev || prev.id !== userId) return prev;
+            return { ...prev, role: newRole };
+          });
+
+          console.log('✅ Rol actualizado en tiempo real');
+        }
+      )
+      .subscribe((status) => {
+        console.log('📡 Estado suscripción rol:', status);
+      });
+
+    roleChannelRef.current = channel;
+  }, []);
+
+  // --------------- INIT AUTH ----------------
   useEffect(() => {
+    mountedRef.current = true;
+
     const initializeAuth = async () => {
       try {
-      const { data: { session } } = await supabase.auth.getSession();
-        await updateUser(session?.user || null);
+        console.log('🔧 Inicializando auth...');
+        const { data: { session }, error } = await supabase.auth.getSession();
+        
+        if (error) {
+          console.error('❌ Error obteniendo sesión:', error);
+          return;
+        }
+
+        console.log('📋 Sesión:', session ? 'con usuario' : 'sin usuario');
+        
+        if (mountedRef.current) {
+          await updateUser(session?.user || null);
+        }
       } catch (error) {
-        console.error('❌ Error inicializando autenticación:', error);
-        setLoading(false);
+        console.error('💥 Error inicializando auth:', error);
+        if (mountedRef.current) {
+          setLoading(false);
+        }
       }
     };
 
-    // Timeout de seguridad para garantizar que el loading termine
-    const safetyTimeout = setTimeout(() => {
-    setLoading(false);
-    }, 5000); // 5 segundos máximo
+    initializeAuth();
 
-    initializeAuth().finally(() => {
-      clearTimeout(safetyTimeout);
-    });
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      try {
+    // Suscripción a cambios de auth
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (event, session) => {
+        if (!mountedRef.current) return;
+        
+        console.log('🔄 Cambio de estado auth:', event);
         await updateUser(session?.user || null);
-      } catch (error) {
-        console.error('❌ Error en cambio de estado de autenticación:', error);
-        setLoading(false);
       }
-    });
+    );
 
-    return () => subscription.unsubscribe();
-  }, []);
+    return () => {
+      mountedRef.current = false;
+      subscription.unsubscribe();
+      
+      // Limpiar suscripción de rol
+      if (roleChannelRef.current) {
+        supabase.removeChannel(roleChannelRef.current);
+        roleChannelRef.current = null;
+      }
+    };
+  }, [updateUser]);
 
+  // --------------- EFFECT PARA SUSCRIPCIÓN DE ROL ----------------
+  useEffect(() => {
+    if (!user?.id) {
+      // Limpiar suscripción si no hay usuario
+      if (roleChannelRef.current) {
+        supabase.removeChannel(roleChannelRef.current);
+        roleChannelRef.current = null;
+      }
+      return;
+    }
+
+    // Configurar suscripción cuando el usuario cambia
+    setupRoleSubscription(user.id);
+
+    return () => {
+      // Limpiar suscripción cuando el componente se desmonta o el usuario cambia
+      if (roleChannelRef.current) {
+        supabase.removeChannel(roleChannelRef.current);
+        roleChannelRef.current = null;
+      }
+    };
+  }, [user?.id, setupRoleSubscription]);
+
+  // --------------- AUTH ACTIONS ----------------
   const login = async (email: string, password: string) => {
     setLoading(true);
     try {
-      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) throw error;
+      
+      // Limpiar cache del rol para forzar recarga
+      if (data?.user?.id) {
+        localStorage.removeItem(`user_role_${data.user.id}`);
+      }
+      
       setIsAuthOpen(false);
+    } catch (error: any) {
+      console.error('❌ Error en login:', error);
+      throw error;
     } finally {
       setLoading(false);
     }
@@ -115,22 +259,13 @@ export const useAuth = () => {
       const { data, error } = await supabase.auth.signUp({
         email,
         password,
-        options: { data: { name } }
+        options: { data: { name } },
       });
       if (error) throw error;
-      
-      // Asignar rol por defecto al usuario recién registrado
-      if (data.user) {
-        try {
-          await supabase
-            .from('user_roles')
-            .insert({ user_id: data.user.id, role: 'customer' });
-        } catch (roleError) {
-        // No es crítico, el usuario puede usar la app sin rol específico
-        }
-      }
-      
       setIsAuthOpen(false);
+    } catch (error: any) {
+      console.error('❌ Error en registro:', error);
+      throw error;
     } finally {
       setLoading(false);
     }
@@ -139,8 +274,18 @@ export const useAuth = () => {
   const logout = async () => {
     setLoading(true);
     try {
+      const userId = user?.id;
       await supabase.auth.signOut();
+      
+      // Limpiar cache del rol
+      if (userId) {
+        localStorage.removeItem(`user_role_${userId}`);
+      }
+      
       setUser(null);
+    } catch (error: any) {
+      console.error('❌ Error en logout:', error);
+      throw error;
     } finally {
       setLoading(false);
     }
@@ -153,82 +298,122 @@ export const useAuth = () => {
         redirectTo: `${window.location.origin}/reset-password`,
       });
       if (error) throw error;
+    } catch (error: any) {
+      console.error('❌ Error en forgot password:', error);
+      throw error;
     } finally {
       setLoading(false);
     }
   };
 
-  const openAuthModal = (mode: 'login' | 'register' | 'forgot-password' = 'login') => {
-    setAuthMode(mode);
-    setIsAuthOpen(true);
-  };
-
-  const closeAuthModal = () => {
-    setIsAuthOpen(false);
-  };
-
-  // Funciones para gestión de roles
+  // --------------- ROLE MANAGEMENT ----------------
   const assignRole = async (userId: string, role: UserRole) => {
     try {
+      console.log(`🎯 Asignando rol ${role} a usuario ${userId}`);
+      
       const { error } = await supabase
         .from('user_roles')
         .upsert({ user_id: userId, role });
+
+      if (error) {
+        console.error('❌ Error asignando rol:', error);
+        return false;
+      }
+
+      // ✅ LIMPIAR CACHE del usuario afectado para forzar recarga
+      clearUserRoleCache(userId);
       
-      if (error) throw error;
+      console.log('✅ Rol asignado exitosamente - Cache limpiado');
       return true;
     } catch (error) {
-      console.error('Error asignando rol:', error);
+      console.error('❌ Error asignando rol:', error);
       return false;
     }
   };
 
-  const getUserRole = async (userId: string): Promise<UserRole> => {
+  // --------------- FORZAR ACTUALIZACIÓN DE OTRO USUARIO ----------------
+  const refreshUserRole = async (userId: string): Promise<UserRole> => {
     try {
-      const { data, error } = await supabase
-        .from('user_roles')
-        .select('role')
-        .eq('user_id', userId)
-        .single();
+      console.log(`🔄 Forzando actualización de rol para usuario: ${userId}`);
       
-      if (error) throw error;
-      return data?.role || 'customer';
+      // Limpiar cache y recargar
+      clearUserRoleCache(userId);
+      const newRole = await loadUserRole(userId, true);
+      
+      return newRole;
     } catch (error) {
-      console.error('Error obteniendo rol:', error);
+      console.error('❌ Error refrescando rol de usuario:', error);
       return 'customer';
     }
   };
 
-  const hasRole = (requiredRole: UserRole): boolean => {
-    if (!user) return false;
+  // --------------- ROLE HELPERS ----------------
+  const hasRole = useCallback((requiredRole: UserRole): boolean => {
+    if (!user?.role) return false;
     
-    const roleHierarchy = { customer: 0, worker: 1, admin: 2 };
-    const userLevel = roleHierarchy[user.role || 'customer'];
-    const requiredLevel = roleHierarchy[requiredRole];
+    const hierarchy: Record<UserRole, number> = {
+      customer: 0,
+      worker: 1,
+      admin: 2,
+    };
+
+    return hierarchy[user.role] >= hierarchy[requiredRole];
+  }, [user]);
+
+  const isAdmin = useCallback(() => hasRole('admin'), [hasRole]);
+  const isWorker = useCallback(() => hasRole('worker'), [hasRole]);
+  const canAccessAdmin = useCallback(() => isAdmin() || isWorker(), [isAdmin, isWorker]);
+
+  // --------------- REFRESCAR ROL ACTUAL ----------------
+  const refreshRole = async (): Promise<UserRole> => {
+    if (!user?.id) return 'customer';
     
-    return userLevel >= requiredLevel;
+    try {
+      // Limpiar cache y recargar
+      clearUserRoleCache(user.id);
+      const newRole = await loadUserRole(user.id, true);
+      
+      setUser(prev => prev ? { ...prev, role: newRole } : null);
+      return newRole;
+    } catch (error) {
+      console.error('❌ Error refrescando rol:', error);
+      return user.role;
+    }
   };
 
-  const isAdmin = () => hasRole('admin');
-  const isWorker = () => hasRole('worker');
-  const canAccessAdmin = () => isAdmin() || isWorker();
-
   return {
+    // State
     user,
     isAuthOpen,
     authMode,
     loading,
+    
+    // Actions
     login,
     register,
-    forgotPassword,
     logout,
-    openAuth: openAuthModal,
-    closeAuth: closeAuthModal,
-    setAuthMode,
+    forgotPassword,
+    
+    // Auth modal
+    openAuth: (mode: 'login' | 'register' | 'forgot-password' = 'login') => {
+      setAuthMode(mode);
+      setIsAuthOpen(true);
+    },
+    closeAuth: () => setIsAuthOpen(false),
+    
+    // Role Management
     assignRole,
-    getUserRole,
+    refreshRole,
+    refreshUserRole, // ✅ NUEVO: Para forzar actualización de otros usuarios
+    clearUserRoleCache, // ✅ NUEVO: Para limpiar cache manualmente
+    
+    // Role Helpers
     hasRole,
     isAdmin,
     isWorker,
-    canAccessAdmin
+    canAccessAdmin,
+    
+    // Mode setter
+    setAuthMode,
   };
 };

@@ -1,39 +1,31 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Product } from '../types';
-import { Star, Sparkles, Plus, Minus, ShoppingBag } from 'lucide-react';
-import { useAuth } from '../hooks/useAuth';
-import { useCart } from '../hooks/useCart';
+import { Star, Sparkles } from 'lucide-react';
 
 interface ProductCardProps {
   product: Product;
-  onClick?: (product: Product) => void;
-  onAddToCart?: (product: Product, quantity: number, variant?: any) => void;
 }
 
-const ProductCard: React.FC<ProductCardProps> = ({ product, onClick, onAddToCart }) => {
+const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
   const navigate = useNavigate();
-  const { user } = useAuth();
-  const { addToCart } = useCart();
   
-  // Lógica para manejar variantes
+  // Lógica para manejar variantes - mostrar producto principal primero
   const getDefaultModel = () => {
     if (!product.variants || product.variants.length === 0) return '';
-    const firstModel = product.variants.find(v => v.model) || product.variants[0];
-    return firstModel.model || '';
+    // Si hay variantes, no seleccionar ninguna por defecto para mostrar el producto principal
+    return '';
   };
 
   const [selectedModel, setSelectedModel] = useState(getDefaultModel());
-  const [quantity, setQuantity] = useState(1);
-  const [showQuantitySelector, setShowQuantitySelector] = useState(false);
 
   useEffect(() => {
     const defModel = getDefaultModel();
     setSelectedModel(defModel);
   }, [product.id]);
 
-  const selectedVariant = product.variants?.find(v => v.model === selectedModel) || product.variants?.[0];
-  const stock = (selectedVariant ? selectedVariant.stock : product.stock) ?? 0;
+  // Solo usar variante si está seleccionada, sino usar producto principal
+  const selectedVariant = selectedModel ? product.variants?.find(v => v.model === selectedModel) : null;
 
   const formatPrice = (price: number) => {
     return new Intl.NumberFormat('es-MX', {
@@ -42,11 +34,15 @@ const ProductCard: React.FC<ProductCardProps> = ({ product, onClick, onAddToCart
     }).format(price);
   };
 
-  const displayImage = selectedVariant ? selectedVariant.image : product.image;
-  const displayPrice = selectedVariant ? selectedVariant.price : product.price;
+  const displayImage = selectedVariant?.image || product.image;
+  const displayPrice = selectedVariant?.price || product.price;
+  const hasVariantStock = product.variants && product.variants.length > 0
+    ? product.variants.some(variant => (variant.stock ?? 0) > 0)
+    : false;
+  const baseAvailable = product.in_stock !== false && (product.stock ?? 0) > 0;
+  const isSoldOut = !(baseAvailable || hasVariantStock);
 
-  // Mostrar cantidad solo si hay menos de 20 unidades
-  const showStockCount = stock > 0 && stock <= 20;
+  // La disponibilidad se maneja en ProductPage
 
   const handleClick = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -61,82 +57,16 @@ const ProductCard: React.FC<ProductCardProps> = ({ product, onClick, onAddToCart
     e.stopPropagation();
   };
 
-  const handleAddToCartClick = async (e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    
-    if (!user) {
-      // Si no está autenticado, navegar a la página del producto donde puede iniciar sesión
-      navigate(`/producto/${product.id}`);
-      return;
-    }
 
-    try {
-      if (onAddToCart) {
-        await onAddToCart(product, quantity, selectedVariant);
-      } else {
-        await addToCart(product, quantity, selectedVariant);
-      }
-      
-      // Feedback visual
-      const button = e.currentTarget as HTMLButtonElement;
-      if (button) {
-        const originalText = button.innerHTML;
-        button.innerHTML = '✓ Añadido';
-        button.classList.add('bg-green-500');
-      
-      
-      // Disparar evento personalizado para actualizar el carrito
-      const cartUpdateEvent = new CustomEvent('cart-updated', { 
-        detail: { action: 'add', productId: product.id, quantity } 
-      });
-      window.dispatchEvent(cartUpdateEvent);
-      
-      setTimeout(() => {
-        if (button) {
-          button.innerHTML = originalText;
-          button.classList.remove('bg-green-500');
-        }
-        setShowQuantitySelector(false);
-        setQuantity(1);
-      }, 2000);
-      }
-    } catch (error) {
-      console.error('Error adding to cart:', error);
-    }
-  };
-
-  const handleQuantityChange = (e: React.MouseEvent) => {
-    e.stopPropagation();
-  };
 
   return (
     <div
       className="group relative bg-gradient-to-br from-gray-800 to-gray-900 rounded-2xl overflow-hidden shadow-2xl hover:shadow-gray-400/20 transition-all duration-500 transform hover:scale-105 h-full flex flex-col cursor-pointer"
       onClick={handleClick}
     >
-      {/* Badges */}
-      <div className="absolute top-4 left-4 z-10 flex flex-col space-y-2">
-        {product.is_new && (
-          <span className="bg-gradient-to-r from-green-500 to-green-600 text-white px-3 py-1 rounded-full text-xs font-bold shadow-lg">
-            NUEVO
-          </span>
-        )}
-        {product.is_featured && (
-          <span className="bg-gradient-to-r from-gray-300 to-gray-500 text-black px-3 py-1 rounded-full text-xs font-bold shadow-lg flex items-center space-x-1">
-            <Star className="h-3 w-3" fill="currentColor" />
-            <span>DESTACADO</span>
-          </span>
-        )}
-        {product.original_price && product.original_price > displayPrice && (
-          <span className="bg-gradient-to-r from-red-500 to-red-600 text-white px-3 py-1 rounded-full text-xs font-bold shadow-lg">
-            OFERTA
-          </span>
-        )}
-      </div>
 
       {/* Imagen */}
-      <div className="relative h-100 sm:h-80 overflow-hidden">
+      <div className="relative w-full aspect-[3/4] sm:aspect-[4/5] overflow-hidden">
         <img
           src={displayImage}
           alt={product.name}
@@ -147,6 +77,25 @@ const ProductCard: React.FC<ProductCardProps> = ({ product, onClick, onAddToCart
         <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity duration-500">
           <Sparkles className="h-5 w-5 text-gray-300 animate-pulse" />
         </div>
+
+        {isSoldOut && (
+          <div className="absolute inset-0 bg-black/70 flex items-center justify-center">
+            <span className="text-white font-bold tracking-widest">AGOTADO</span>
+          </div>
+        )}
+
+        {/* Badges pequeños en la parte inferior de la imagen */}
+        <div className="absolute bottom-2 left-2 right-2 flex flex-wrap gap-1 justify-start">
+          {product.is_new && (
+            <span className="bg-green-600 text-white px-2 py-0.5 rounded-full text-[10px] font-bold">NUEVO</span>
+          )}
+          {product.is_featured && (
+            <span className="bg-gray-300 text-black px-2 py-0.5 rounded-full text-[10px] font-bold">DESTACADO</span>
+          )}
+          {product.original_price && product.original_price > displayPrice && (
+            <span className="bg-red-600 text-white px-2 py-0.5 rounded-full text-[10px] font-bold">OFERTA</span>
+          )}
+        </div>
       </div>
 
       {/* Información del producto */}
@@ -155,14 +104,11 @@ const ProductCard: React.FC<ProductCardProps> = ({ product, onClick, onAddToCart
           <h3 className="text-lg font-bold text-white mb-1 group-hover:text-gray-300 transition-colors duration-300 line-clamp-2">
             {product.name}
           </h3>
-          <p className="text-sm text-gray-400 font-medium tracking-wide">
+          <p className="text-sm font-medium tracking-wide text-yellow-400">
             {product.material}
           </p>
         </div>
 
-        <p className="text-gray-300 text-sm mb-4 line-clamp-2 leading-relaxed flex-1">
-          {product.description}
-        </p>
 
         {/* Selector de modelo (solo si hay variantes con modelo) */}
         {product.variants && product.variants.some(v => v.model) && (
@@ -174,6 +120,7 @@ const ProductCard: React.FC<ProductCardProps> = ({ product, onClick, onAddToCart
               onChange={e => setSelectedModel(e.target.value)}
               onClick={handleSelectChange}
             >
+              <option value="">Producto Principal</option>
               {[...new Set(product.variants.map(v => v.model).filter(Boolean))].map(model => (
                 <option key={model} value={model}>{model}</option>
               ))}
@@ -204,77 +151,7 @@ const ProductCard: React.FC<ProductCardProps> = ({ product, onClick, onAddToCart
             </div>
           )}
 
-          {/* Estado de stock */}
-          <div className="flex items-center gap-2 mb-3">
-            <div className={`w-2 h-2 rounded-full ${stock > 0 ? 'bg-green-500' : 'bg-red-500'}`}></div>
-            <span className={`text-xs ${stock > 0 ? 'text-green-400' : 'text-red-400'}`}>
-              {stock > 0 ? (showStockCount ? `${stock} Restantes` : 'Disponible') : 'Agotado'}
-            </span>
-          </div>
-
-          {/* Selector de cantidad y botón agregar */}
-          {stock > 0 && (
-            <div className="space-y-3">
-              {!showQuantitySelector ? (
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setShowQuantitySelector(true);
-                  }}
-                  className="w-full bg-gradient-to-r from-yellow-400 via-yellow-500 to-yellow-600 text-black py-2 px-4 rounded-lg font-bold text-sm tracking-wide hover:shadow-lg transition-all duration-300 flex items-center justify-center space-x-2"
-                >
-                  <ShoppingBag className="h-4 w-4" />
-                  <span>AGREGAR AL CARRITO</span>
-                </button>
-              ) : (
-                <div className="space-y-2">
-                  <div className="flex items-center justify-center space-x-3">
-                    <button
-                      onClick={(e) => {
-                        handleQuantityChange(e);
-                        setQuantity(Math.max(1, quantity - 1));
-                      }}
-                      className="w-8 h-8 bg-gray-700 hover:bg-gray-600 rounded-lg flex items-center justify-center text-white text-lg font-bold"
-                    >
-                      <Minus className="h-4 w-4" />
-                    </button>
-                    <span className="font-bold text-white w-8 text-center">
-                      {quantity}
-                    </span>
-                    <button
-                      onClick={(e) => {
-                        handleQuantityChange(e);
-                        setQuantity(quantity + 1);
-                      }}
-                      className="w-8 h-8 bg-gray-700 hover:bg-gray-600 rounded-lg flex items-center justify-center text-white text-lg font-bold"
-                    >
-                      <Plus className="h-4 w-4" />
-                    </button>
-                  </div>
-                  
-                  <div className="flex space-x-2">
-                    <button
-                      onClick={handleAddToCartClick}
-                      className="flex-1 bg-gradient-to-r from-yellow-400 via-yellow-500 to-yellow-600 text-black py-2 px-3 rounded-lg font-bold text-xs tracking-wide hover:shadow-lg transition-all duration-300 flex items-center justify-center space-x-1"
-                    >
-                      <ShoppingBag className="h-3 w-3" />
-                      <span>AGREGAR</span>
-                    </button>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setShowQuantitySelector(false);
-                        setQuantity(1);
-                      }}
-                      className="px-3 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg text-xs font-medium transition-colors"
-                    >
-                      Cancelar
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
+          {/* Estado de stock removido: ahora se maneja en ProductPage */}
         </div>
       </div>
 

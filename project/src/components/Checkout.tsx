@@ -2,6 +2,8 @@ import React, { useState, useRef, useEffect } from 'react';
 import { X, CreditCard, ArrowLeft, Check, Lock, Truck, Shield } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import type { CartItem } from '../types';
+import { useAddresses } from '../hooks/useAddresses';
+import type { UserAddress } from '../types';
 
 interface CheckoutCartItem extends CartItem {
   name: string;
@@ -59,6 +61,10 @@ const Checkout: React.FC<CheckoutProps> = ({
   const [isProcessing, setIsProcessing] = useState(false);
   const [orderCompleted, setOrderCompleted] = useState(false);
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+  const { addresses, loading: addressesLoading, create, load } = useAddresses();
+  const [selectedAddressId, setSelectedAddressId] = useState<number | null>(null);
+  const [selectionError, setSelectionError] = useState('');
+  const [addressFeedback, setAddressFeedback] = useState('');
   
   // Ref para evitar duplicados de purchase
   const lastPurchaseEventID = useRef<string | null>(null);
@@ -104,6 +110,36 @@ const Checkout: React.FC<CheckoutProps> = ({
       lastPurchaseEventID.current = null;
     }
   }, [orderCompleted, items, totalPrice, user]);
+
+  useEffect(() => {
+    if (!addressesLoading && addresses.length > 0 && !selectedAddressId) {
+      const defaultAddress = addresses.find(a => a.is_default) || addresses[0];
+      if (defaultAddress) {
+        setSelectedAddressId(defaultAddress.id);
+        setShippingAddress({
+          firstName: defaultAddress.name?.split(' ')[0] || '',
+          lastName: defaultAddress.name?.split(' ').slice(1).join(' ') || '',
+          email: user?.email || '',
+          phone: defaultAddress.phone || '',
+          address: defaultAddress.address_line1,
+          address_line2: defaultAddress.address_line2 || '',
+          city: defaultAddress.city,
+          state: defaultAddress.state || '',
+          postalCode: defaultAddress.postal_code || '',
+          country: defaultAddress.country === 'MX' ? 'México' : (defaultAddress.country || 'México'),
+        });
+      }
+    }
+  }, [addresses, addressesLoading, selectedAddressId, user?.email]);
+
+  useEffect(() => {
+    if (isOpen) {
+      load();
+      setSelectionError('');
+      setAddressFeedback('');
+      setCurrentStep(1);
+    }
+  }, [isOpen, load]);
 
   const formatPrice = (price: number) => {
     return new Intl.NumberFormat('es-MX', {
@@ -158,11 +194,43 @@ const Checkout: React.FC<CheckoutProps> = ({
     return Object.keys(errors).length === 0;
   };
 
-  const handleShippingSubmit = (e: React.FormEvent) => {
+  const handleShippingSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (validateForm()) {
-      setCurrentStep(2);
+    setSelectionError('');
+    setAddressFeedback('');
+
+    if (addresses.length === 0) {
+      if (!validateForm()) return;
+
+      try {
+        const createdAddress = await create({
+          label: 'Casa',
+          name: `${shippingAddress.firstName} ${shippingAddress.lastName}`.trim(),
+          phone: shippingAddress.phone,
+          address_line1: shippingAddress.address,
+          address_line2: shippingAddress.address_line2,
+          city: shippingAddress.city,
+          state: shippingAddress.state,
+          postal_code: shippingAddress.postalCode,
+          country: 'MX',
+          is_default: true,
+        } as Omit<UserAddress, 'id' | 'user_id' | 'created_at' | 'updated_at'>);
+
+        setSelectedAddressId(createdAddress.id);
+        setAddressFeedback('Dirección guardada. Revisa y continúa.');
+      } catch (error) {
+        console.error('Error guardando dirección:', error);
+        setSelectionError('No pudimos guardar la dirección, intenta nuevamente.');
+      }
+      return;
     }
+
+    if (!selectedAddressId) {
+      setSelectionError('Selecciona una dirección para continuar.');
+      return;
+    }
+
+    setCurrentStep(2);
   };
 
   const handlePaymentSubmit = async (e: React.FormEvent) => {
@@ -206,13 +274,22 @@ const Checkout: React.FC<CheckoutProps> = ({
     }
 
     // Preparar payload
+    // Si se creó una nueva dirección, usar esa; si no, usar la seleccionada
+    const finalAddressId = selectedAddressId;
+    const finalAddressSnapshot = finalAddressId 
+      ? (addresses.find(a => a.id === finalAddressId) || null)
+      : null;
+    
     const requestPayload = {
       cartItems: validatedItems,
       user: { 
         id: authSession.user.id,
         email: authSession.user.email
       },
-      shipping: shippingAddress
+      shipping: shippingAddress,
+      selectedAddressId: finalAddressId,
+      shipping_address_id: finalAddressId,
+      shipping_snapshot: finalAddressSnapshot
     };
 
       console.log('Enviando a Supabase Edge:', requestPayload);
@@ -320,7 +397,7 @@ const Checkout: React.FC<CheckoutProps> = ({
 
           <div className="flex flex-col lg:flex-row h-full max-h-[calc(90vh-80px)]">
             {/* Main Content */}
-            <div className="flex-1 p-6 overflow-y-auto">
+            <div className="flex-1 p-6 overflow-y-auto min-h-0">
               {!orderCompleted && (
                 <div className="flex items-center justify-center mb-8">
                   <div className="flex items-center space-x-4">
@@ -343,222 +420,353 @@ const Checkout: React.FC<CheckoutProps> = ({
                   </div>
                 </div>
               )}
-{/* Step 1: Shipping Address */}
+
+              {selectionError && (
+                <p className="text-red-400 text-sm">{selectionError}</p>
+              )}
+              {addressFeedback && (
+                <p className="text-green-400 text-sm">{addressFeedback}</p>
+              )}
+
+              {/* Step 1: Shipping Address */}
               {currentStep === 1 && (
                 <form onSubmit={handleShippingSubmit} className="space-y-6">
                   <h3 className="text-xl font-bold text-white mb-6">Información de Envío</h3>
-                  
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-300 mb-2">
-                        Nombre *
-                      </label>
-                      <input
-                        type="text"
-                        required
-                        value={shippingAddress.firstName}
-                        onChange={(e) => setShippingAddress({...shippingAddress, firstName: e.target.value})}
-                        className={`w-full px-4 py-3 bg-gray-800 border rounded-lg text-white focus:outline-none transition-colors duration-300 ${
-                          formErrors.firstName ? 'border-red-500 focus:border-red-400' : 'border-gray-600 focus:border-yellow-400'
-                        }`}
-                        placeholder="Ingresa tu nombre"
-                      />
-                      {formErrors.firstName && (
-                        <p className="text-red-400 text-xs mt-1">{formErrors.firstName}</p>
-                      )}
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-300 mb-2">
-                        Apellidos *
-                      </label>
-                      <input
-                        type="text"
-                        required
-                        value={shippingAddress.lastName}
-                        onChange={(e) => setShippingAddress({...shippingAddress, lastName: e.target.value})}
-                        className={`w-full px-4 py-3 bg-gray-800 border rounded-lg text-white focus:outline-none transition-colors duration-300 ${
-                          formErrors.lastName ? 'border-red-500 focus:border-red-400' : 'border-gray-600 focus:border-yellow-400'
-                        }`}
-                        placeholder="Ingresa tus apellidos"
-                      />
-                      {formErrors.lastName && (
-                        <p className="text-red-400 text-xs mt-1">{formErrors.lastName}</p>
-                      )}
-                    </div>
-                  </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-300 mb-2">
-                        Email *
-                      </label>
-                      <input
-                        type="email"
-                        required
-                        value={shippingAddress.email}
-                        readOnly
-                        className={`w-full px-4 py-3 bg-gray-800 border rounded-lg text-white focus:outline-none transition-colors duration-300 ${
-                          formErrors.email ? 'border-red-500 focus:border-red-400' : 'border-gray-600 focus:border-yellow-400'
-                        }`}
-                        placeholder="tu@email.com"
-                      />
-
-                      {formErrors.email && (
-                        <p className="text-red-400 text-xs mt-1">{formErrors.email}</p>
-                      )}
+                  {/* Selección de dirección guardada */}
+                  {!addressesLoading && addresses.length > 0 && (
+                    <div className="space-y-3 mb-4">
+                      <h4 className="text-white font-semibold">Elige una dirección</h4>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        {addresses.map((a) => (
+                          <label key={a.id} className={`cursor-pointer border rounded-lg p-4 bg-gray-800/60 border-gray-700 flex items-start space-x-3 ${selectedAddressId === a.id ? 'ring-2 ring-yellow-400' : ''}`}>
+                            <input type="radio" name="address" className="mt-1" checked={selectedAddressId === a.id} onChange={() => {
+                              setSelectedAddressId(a.id);
+                              setSelectionError('');
+                              setAddressFeedback('');
+                              setShippingAddress({
+                                firstName: a.name?.split(' ')[0] || '',
+                                lastName: a.name?.split(' ').slice(1).join(' ') || '',
+                                email: user?.email || '',
+                                phone: a.phone || '',
+                                address: a.address_line1,
+                                address_line2: a.address_line2 || '',
+                                city: a.city,
+                                state: a.state || '',
+                                postalCode: a.postal_code || '',
+                                country: a.country === 'MX' ? 'México' : (a.country || 'México'),
+                              });
+                            }} />
+                            <div>
+                              <div className="flex items-center space-x-2">
+                                <span className="text-white font-medium">{a.label || 'Dirección'}</span>
+                                {a.is_default && <span className="text-xs text-yellow-400">(Predeterminada)</span>}
+                              </div>
+                              <div className="text-gray-300 text-sm">{a.address_line1}</div>
+                              {a.address_line2 && <div className="text-gray-400 text-xs">{a.address_line2}</div>}
+                              <div className="text-gray-400 text-xs">{a.city}{a.state ? `, ${a.state}` : ''} {a.postal_code || ''}</div>
+                              <div className="text-gray-500 text-xs">{a.country || 'MX'} {a.phone ? `· ${a.phone}` : ''}</div>
+                            </div>
+                          </label>
+                        ))}
+                      </div>
+                      <div className="text-xs text-gray-400">
+                        Administra tus direcciones en
+                        <button
+                          type="button"
+                          onClick={() => {
+                            onClose();
+                            window.location.assign('/addresses');
+                          }}
+                          className="ml-1 text-yellow-400 hover:text-yellow-300 underline"
+                        >
+                          Mis Direcciones
+                        </button>
+                        (menú de usuario).
+                      </div>
                     </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-300 mb-2">
-                        Teléfono *
-                      </label>
-                      <input
-                        type="tel"
-                        required
-                        value={shippingAddress.phone}
-                        onChange={(e) => {
-                          // Solo permitir números
-                          const value = e.target.value.replace(/\D/g, '');
-                          if (value.length <= 10) {
-                            setShippingAddress({...shippingAddress, phone: value});
-                          }
-                        }}
-                        className={`w-full px-4 py-3 bg-gray-800 border rounded-lg text-white focus:outline-none transition-colors duration-300 ${
-                          formErrors.phone ? 'border-red-500 focus:border-red-400' : 'border-gray-600 focus:border-yellow-400'
-                        }`}
-                        placeholder="5512345678"
-                        maxLength={10}
-                      />
-                      {formErrors.phone && (
-                        <p className="text-red-400 text-xs mt-1">{formErrors.phone}</p>
-                      )}
-                    </div>
-                  </div>
+                  )}
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-300 mb-2">
-                        Código Postal *
-                      </label>
-                      <input
-                        type="text"
-                        required
-                        maxLength={5}
-                        value={shippingAddress.postalCode}
-                        onChange={(e) => {
-                          const value = e.target.value.replace(/\D/g, '');
-                          setShippingAddress({...shippingAddress, postalCode: value});
-                        }}
-                        className={`w-full px-4 py-3 bg-gray-800 border rounded-lg text-white focus:outline-none transition-colors duration-300 ${
-                          formErrors.postalCode ? 'border-red-500 focus:border-red-400' : 'border-gray-600 focus:border-yellow-400'
-                        }`}
-                        placeholder="12345"
-                      />
-                      {formErrors.postalCode && (
-                        <p className="text-red-400 text-xs mt-1">{formErrors.postalCode}</p>
-                      )}
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-300 mb-2">
-                        Colonia/Fraccionamiento *
-                      </label>
-                      <input
-                        type="text"
-                        required
-                        value={shippingAddress.address}
-                        onChange={(e) => setShippingAddress({...shippingAddress, address: e.target.value})}
-                        className={`w-full px-4 py-3 bg-gray-800 border rounded-lg text-white focus:outline-none transition-colors duration-300 ${
-                          formErrors.address ? 'border-red-500 focus:border-red-400' : 'border-gray-600 focus:border-yellow-400'
-                        }`}
-                        placeholder="Nombre de tu colonia"
-                      />
-                      {formErrors.address && (
-                        <p className="text-red-400 text-xs mt-1">{formErrors.address}</p>
-                      )}
-                    </div>
-                  </div>
+                  {/* Si no hay direcciones, mostrar formulario para capturar */}
+                  {addresses.length === 0 && (
+                    <>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-300 mb-2">
+                            Nombre *
+                          </label>
+                          <input
+                            type="text"
+                            required
+                            value={shippingAddress.firstName}
+                            onChange={(e) => setShippingAddress({...shippingAddress, firstName: e.target.value})}
+                            className={`w-full px-4 py-3 bg-gray-800 border rounded-lg text-white focus:outline-none transition-colors duration-300 ${
+                              formErrors.firstName ? 'border-red-500 focus:border-red-400' : 'border-gray-600 focus:border-yellow-400'
+                            }`}
+                            placeholder="Ingresa tu nombre"
+                          />
+                          {formErrors.firstName && (
+                            <p className="text-red-400 text-xs mt-1">{formErrors.firstName}</p>
+                          )}
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-300 mb-2">
+                            Apellidos *
+                          </label>
+                          <input
+                            type="text"
+                            required
+                            value={shippingAddress.lastName}
+                            onChange={(e) => setShippingAddress({...shippingAddress, lastName: e.target.value})}
+                            className={`w-full px-4 py-3 bg-gray-800 border rounded-lg text-white focus:outline-none transition-colors duration-300 ${
+                              formErrors.lastName ? 'border-red-500 focus:border-red-400' : 'border-gray-600 focus:border-yellow-400'
+                            }`}
+                            placeholder="Ingresa tus apellidos"
+                          />
+                          {formErrors.lastName && (
+                            <p className="text-red-400 text-xs mt-1">{formErrors.lastName}</p>
+                          )}
+                        </div>
+                      </div>
 
-                  <div>
-                    <label className="block text-sm font-medium text-gray-300 mb-2">
-                      Calle y número
-                    </label>
-                    <input
-                      type="text"
-                      value={shippingAddress.address_line2 || ''}
-                      onChange={(e) => setShippingAddress({...shippingAddress, address_line2: e.target.value})}
-                      className="w-full px-4 py-3 bg-gray-800 border border-gray-600 rounded-lg text-white focus:border-yellow-400 focus:outline-none transition-colors duration-300"
-                      placeholder="Calle Principal #123, Interior 4"
-                    />
-                  </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-300 mb-2">
+                            Email *
+                          </label>
+                          <input
+                            type="email"
+                            required
+                            value={shippingAddress.email}
+                            readOnly
+                            className={`w-full px-4 py-3 bg-gray-800 border rounded-lg text-white focus:outline-none transition-colors duration-300 ${
+                              formErrors.email ? 'border-red-500 focus:border-red-400' : 'border-gray-600 focus:border-yellow-400'
+                            }`}
+                            placeholder="tu@email.com"
+                          />
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-300 mb-2">
-                        Municipio *
-                      </label>
-                      <input
-                        type="text"
-                        required
-                        value={shippingAddress.city}
-                        onChange={(e) => setShippingAddress({...shippingAddress, city: e.target.value})}
-                        className={`w-full px-4 py-3 bg-gray-800 border rounded-lg text-white focus:outline-none transition-colors duration-300 ${
-                          formErrors.city ? 'border-red-500 focus:border-red-400' : 'border-gray-600 focus:border-yellow-400'
-                        }`}
-                        placeholder="Tu municipio"
-                      />
-                      {formErrors.city && (
-                        <p className="text-red-400 text-xs mt-1">{formErrors.city}</p>
-                      )}
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-300 mb-2">
-                        Estado *
-                      </label>
-                      <input
-                        type="text"
-                        required
-                        value={shippingAddress.state}
-                        onChange={(e) => setShippingAddress({...shippingAddress, state: e.target.value})}
-                        className={`w-full px-4 py-3 bg-gray-800 border rounded-lg text-white focus:outline-none transition-colors duration-300 ${
-                          formErrors.state ? 'border-red-500 focus:border-red-400' : 'border-gray-600 focus:border-yellow-400'
-                        }`}
-                        placeholder="Tu estado"
-                      />
-                      {formErrors.state && (
-                        <p className="text-red-400 text-xs mt-1">{formErrors.state}</p>
-                      )}
-                    </div>
-                  </div>
+                          {formErrors.email && (
+                            <p className="text-red-400 text-xs mt-1">{formErrors.email}</p>
+                          )}
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-300 mb-2">
+                            Teléfono *
+                          </label>
+                          <input
+                            type="tel"
+                            required
+                            value={shippingAddress.phone}
+                            onChange={(e) => {
+                              // Solo permitir números
+                              const value = e.target.value.replace(/\D/g, '');
+                              if (value.length <= 10) {
+                                setShippingAddress({...shippingAddress, phone: value});
+                              }
+                            }}
+                            className={`w-full px-4 py-3 bg-gray-800 border rounded-lg text-white focus:outline-none transition-colors duration-300 ${
+                              formErrors.phone ? 'border-red-500 focus:border-red-400' : 'border-gray-600 focus:border-yellow-400'
+                            }`}
+                            placeholder="5512345678"
+                            maxLength={10}
+                          />
+                          {formErrors.phone && (
+                            <p className="text-red-400 text-xs mt-1">{formErrors.phone}</p>
+                          )}
+                        </div>
+                      </div>
 
-                  <div>
-                    <label className="block text-sm font-medium text-gray-300 mb-2">País</label>
-                    <input
-                      type="text"
-                      value="México"
-                      readOnly
-                      className="w-full px-4 py-3 bg-gray-700 border border-gray-600 rounded-lg text-gray-300 cursor-not-allowed"
-                    />
-                  </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-300 mb-2">
+                            Código Postal *
+                          </label>
+                          <input
+                            type="text"
+                            required
+                            maxLength={5}
+                            value={shippingAddress.postalCode}
+                            onChange={(e) => {
+                              const value = e.target.value.replace(/\D/g, '');
+                              setShippingAddress({...shippingAddress, postalCode: value});
+                            }}
+                            className={`w-full px-4 py-3 bg-gray-800 border rounded-lg text-white focus:outline-none transition-colors duration-300 ${
+                              formErrors.postalCode ? 'border-red-500 focus:border-red-400' : 'border-gray-600 focus:border-yellow-400'
+                            }`}
+                            placeholder="12345"
+                          />
+                          {formErrors.postalCode && (
+                            <p className="text-red-400 text-xs mt-1">{formErrors.postalCode}</p>
+                          )}
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-300 mb-2">
+                            Colonia/Fraccionamiento *
+                          </label>
+                          <input
+                            type="text"
+                            required
+                            value={shippingAddress.address}
+                            onChange={(e) => setShippingAddress({...shippingAddress, address: e.target.value})}
+                            className={`w-full px-4 py-3 bg-gray-800 border rounded-lg text-white focus:outline-none transition-colors duration-300 ${
+                              formErrors.address ? 'border-red-500 focus:border-red-400' : 'border-gray-600 focus:border-yellow-400'
+                            }`}
+                            placeholder="Nombre de tu colonia"
+                          />
+                          {formErrors.address && (
+                            <p className="text-red-400 text-xs mt-1">{formErrors.address}</p>
+                          )}
+                        </div>
+                      </div>
 
-                  <button
-                    type="submit"
-                    className="w-full bg-gradient-to-r from-yellow-400 via-yellow-500 to-yellow-600 text-black py-4 px-6 rounded-xl font-bold text-lg tracking-wide hover:shadow-lg hover:shadow-yellow-500/25 transition-all duration-300 transform hover:scale-105"
-                  >
-                    CONTINUAR AL PAGO
-                  </button>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-300 mb-2">
+                          Calle y número
+                        </label>
+                        <input
+                          type="text"
+                          value={shippingAddress.address_line2 || ''}
+                          onChange={(e) => setShippingAddress({...shippingAddress, address_line2: e.target.value})}
+                          className="w-full px-4 py-3 bg-gray-800 border border-gray-600 rounded-lg text-white focus:border-yellow-400 focus:outline-none transition-colors duration-300"
+                          placeholder="Calle Principal #123, Interior 4"
+                        />
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-300 mb-2">
+                            Municipio *
+                          </label>
+                          <input
+                            type="text"
+                            required
+                            value={shippingAddress.city}
+                            onChange={(e) => setShippingAddress({...shippingAddress, city: e.target.value})}
+                            className={`w-full px-4 py-3 bg-gray-800 border rounded-lg text-white focus:outline-none transition-colors duration-300 ${
+                              formErrors.city ? 'border-red-500 focus:border-red-400' : 'border-gray-600 focus:border-yellow-400'
+                            }`}
+                            placeholder="Tu municipio"
+                          />
+                          {formErrors.city && (
+                            <p className="text-red-400 text-xs mt-1">{formErrors.city}</p>
+                          )}
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-300 mb-2">
+                            Estado *
+                          </label>
+                          <input
+                            type="text"
+                            required
+                            value={shippingAddress.state}
+                            onChange={(e) => setShippingAddress({...shippingAddress, state: e.target.value})}
+                            className={`w-full px-4 py-3 bg-gray-800 border rounded-lg text-white focus:outline-none transition-colors duration-300 ${
+                              formErrors.state ? 'border-red-500 focus:border-red-400' : 'border-gray-600 focus:border-yellow-400'
+                            }`}
+                            placeholder="Tu estado"
+                          />
+                          {formErrors.state && (
+                            <p className="text-red-400 text-xs mt-1">{formErrors.state}</p>
+                          )}
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-300 mb-2">País</label>
+                        <input
+                          type="text"
+                          value="México"
+                          readOnly
+                          className="w-full px-4 py-3 bg-gray-700 border border-gray-600 rounded-lg text-gray-300 cursor-not-allowed"
+                        />
+                      </div>
+
+                      <button
+                        type="submit"
+                        className="w-full bg-gradient-to-r from-yellow-400 via-yellow-500 to-yellow-600 text-black py-4 px-6 rounded-xl font-bold text-lg tracking-wide hover:shadow-lg hover:shadow-yellow-500/25 transition-all duration-300 transform hover:scale-105"
+                      >
+                        GUARDAR DIRECCIÓN
+                      </button>
+                    </>
+                  )}
+                  {addresses.length > 0 && (
+                    <button
+                      type="submit"
+                      className="w-full bg-gradient-to-r from-yellow-400 via-yellow-500 to-yellow-600 text-black py-4 px-6 rounded-xl font-bold text-lg tracking-wide hover:shadow-lg hover:shadow-yellow-500/25 transition-all duration-300 transform hover:scale-105"
+                    >
+                      CONTINUAR AL PAGO
+                    </button>
+                  )}
                 </form>
               )}
 {/* Step 2: Payment */}
               {currentStep === 2 && (
                 <div className="space-y-6">
-                  <h3 className="text-xl font-bold text-white mb-6">Método de Pago</h3>
-                  
-                  {/* Información de seguridad */}
+                  <h3 className="text-xl font-bold text-white mb-6">Confirma tu pedido</h3>
+
+                  <div className="bg-gray-800/30 rounded-xl p-6 border border-gray-700">
+                    <h4 className="text-lg font-semibold text-white mb-4">Resumen del pedido</h4>
+                    <div className="space-y-4 max-h-64 overflow-y-auto pr-2">
+                      {items.map(item => (
+                        <div key={item.id} className="flex space-x-3">
+                          <img
+                            src={item.image}
+                            alt={item.name}
+                            className="w-12 h-12 object-cover rounded-lg"
+                          />
+                          <div className="flex-1">
+                            <h4 className="text-sm font-medium text-white line-clamp-2">
+                              {item.name}
+                              {item.variant_name && (
+                                <span className="block text-xs text-yellow-400 font-medium">{item.variant_name}</span>
+                              )}
+                            </h4>
+                            <div className="flex justify-between items-center mt-1">
+                              <span className="text-xs text-gray-400">Cantidad: {item.quantity}</span>
+                              <span className="text-sm font-bold text-yellow-400">{formatPrice(item.price * item.quantity)}</span>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="border-t border-gray-600 pt-4 space-y-3 mt-4 text-sm">
+                      <div className="flex justify-between">
+                        <span className="text-gray-300">Subtotal ({items.reduce((acc, item) => acc + item.quantity, 0)} productos):</span>
+                        <span className="text-white font-medium">{formatPrice(totalPrice)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-300">Envío:</span>
+                        <span className="text-white font-medium">{formatPrice(shippingCost)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-300">IVA (16%):</span>
+                        <span className="text-white font-medium">{formatPrice(tax)}</span>
+                      </div>
+                      <div className="flex justify-between text-lg pt-3 border-t border-gray-600">
+                        <span className="font-bold text-white">Total:</span>
+                        <span className="font-bold text-yellow-400">{formatPrice(finalTotal)}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="bg-gray-800/30 rounded-xl p-6 border border-gray-700">
+                    <h4 className="text-lg font-semibold text-white mb-4">Dirección de envío</h4>
+                    <div className="text-sm text-gray-300 space-y-1">
+                      <p className="font-medium text-white">{shippingAddress.firstName} {shippingAddress.lastName}</p>
+                      <p>{shippingAddress.address}</p>
+                      {shippingAddress.address_line2 && <p>{shippingAddress.address_line2}</p>}
+                      <p>{shippingAddress.city}, {shippingAddress.state} {shippingAddress.postalCode}</p>
+                      <p>{shippingAddress.country}</p>
+                      <p>Tel: {shippingAddress.phone}</p>
+                    </div>
+                  </div>
+
                   <div className="bg-gray-800/50 rounded-xl p-6 border border-gray-700">
                     <div className="flex items-center mb-4">
                       <Shield className="h-6 w-6 text-green-400 mr-3" />
                       <h4 className="text-lg font-semibold text-white">Pago 100% Seguro</h4>
                     </div>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm text-gray-300">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm text-gray-300 mb-6">
                       <div className="flex items-center">
                         <Lock className="h-4 w-4 text-gray-400 mr-2" />
                         <span>Encriptación SSL</span>
@@ -572,67 +780,22 @@ const Checkout: React.FC<CheckoutProps> = ({
                         <span>Envío asegurado</span>
                       </div>
                     </div>
-                  </div>
-
-                  {/* Resumen antes del pago */}
-                  <div className="bg-gray-800/30 rounded-xl p-6 border border-gray-700">
-                    <h4 className="text-lg font-semibold text-white mb-4">Resumen de tu pedido</h4>
-                    <div className="space-y-3 text-sm">
-                      <div className="flex justify-between">
-                        <span className="text-gray-300">Subtotal ({items.reduce((acc, item) => acc + item.quantity, 0)} productos):</span>
-                        <span className="text-white font-medium">{formatPrice(totalPrice)}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-gray-300">Envío:</span>
-                        <span className="text-white font-medium">{formatPrice(shippingCost)}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-gray-300">IVA (16%):</span>
-                        <span className="text-white font-medium">{formatPrice(tax)}</span>
-                      </div>
-                      <div className="border-t border-gray-600 pt-3">
-                        <div className="flex justify-between text-lg">
-                          <span className="font-bold text-white">Total:</span>
-                          <span className="font-bold text-yellow-400">{formatPrice(finalTotal)}</span>
-                        </div>
-                      </div>
+                    <div className="flex flex-col items-center justify-center py-4">
+                      <p className="text-gray-300 mb-6 text-center max-w-md">
+                        Serás redirigido a Stripe para completar tu pago de forma segura. 
+                        Aceptamos Visa, Mastercard y American Express.
+                      </p>
+                      <button
+                        onClick={handlePaymentSubmit}
+                        disabled={isProcessing}
+                        className="w-full bg-gradient-to-r from-gray-300 via-gray-400 to-gray-500 text-black py-4 px-6 rounded-xl font-bold text-lg tracking-wide hover:shadow-lg hover:shadow-gray-400/25 transition-all duration-300 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
+                      >
+                        {isProcessing ? 'Redirigiendo a Stripe...' : 'PAGAR'}
+                      </button>
                     </div>
-                  </div>
-
-                  {/* Dirección de envío confirmada */}
-                  <div className="bg-gray-800/30 rounded-xl p-6 border border-gray-700">
-                    <h4 className="text-lg font-semibold text-white mb-4">Enviar a:</h4>
-                    <div className="text-sm text-gray-300 space-y-1">
-                      <p className="font-medium text-white">{shippingAddress.firstName} {shippingAddress.lastName}</p>
-                      <p>{shippingAddress.address}</p>
-                      {shippingAddress.address_line2 && <p>{shippingAddress.address_line2}</p>}
-                      <p>{shippingAddress.city}, {shippingAddress.state} {shippingAddress.postalCode}</p>
-                      <p>{shippingAddress.country}</p>
-                      <p>Tel: {shippingAddress.phone}</p>
-                    </div>
-                  </div>
-
-                  {/* Botón de pago */}
-                  <div className="flex flex-col items-center justify-center py-8">
-                    <div className="flex items-center mb-4">
-                      <CreditCard className="h-8 w-8 text-yellow-400 mr-3" />
-                      <span className="text-xl font-bold text-white">Pago con Tarjeta</span>
-                    </div>
-                    <p className="text-gray-300 mb-6 text-center max-w-md">
-                      Serás redirigido a Stripe para completar tu pago de forma segura. 
-                      Aceptamos Visa, Mastercard y American Express.
-                    </p>
-                    <button
-                      onClick={handlePaymentSubmit}
-                      disabled={isProcessing}
-                      className="w-full bg-gradient-to-r from-gray-300 via-gray-400 to-gray-500 text-black py-4 px-6 rounded-xl font-bold text-lg tracking-wide hover:shadow-lg hover:shadow-gray-400/25 transition-all duration-300 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
-                    >
-                      {isProcessing ? 'Redirigiendo a Stripe...' : 'PAGAR'}
-                    </button>
                   </div>
                 </div>
               )}
-
               {/* Step 3: Order Confirmation */}
               {currentStep === 3 && orderCompleted && (
                 <div className="text-center space-y-6">
@@ -675,30 +838,7 @@ const Checkout: React.FC<CheckoutProps> = ({
 
             {/* Order Summary Sidebar */}
             <div className="lg:w-96 bg-gray-800 p-6 border-l border-gray-700">
-              <h3 className="text-lg font-bold text-white mb-6">Resumen del Pedido</h3>
-              
-              <div className="space-y-4 mb-6">
-                {items.map((item) => (
-                  <div key={item.id} className="flex space-x-3">
-                    <img
-                      src={item.image}
-                      alt={item.name}
-                      className="w-12 h-12 object-cover rounded-lg"
-                    />
-                    <div className="flex-1">
-                      <h4 className="text-sm font-medium text-white line-clamp-2">{item.name}
-                        {item.variant_name && (
-                          <span className="block text-xs text-yellow-400 font-medium">{item.variant_name}</span>
-                        )}
-                      </h4>
-                      <div className="flex justify-between items-center mt-1">
-                        <span className="text-xs text-gray-400">Cantidad: {item.quantity}</span>
-                        <span className="text-sm font-bold text-yellow-400">{formatPrice(item.price * item.quantity)}</span>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
+              <h3 className="text-lg font-bold text-white mb-6">Resumen de Costos</h3>
 
               <div className="border-t border-gray-600 pt-4 space-y-3">
                 <div className="flex justify-between text-sm">
@@ -710,7 +850,7 @@ const Checkout: React.FC<CheckoutProps> = ({
                   <span className="text-white">{formatPrice(shippingCost)}</span>
                 </div>
                 <div className="flex justify-between text-sm">
-                  <span className="text-gray-400">IVA (21%):</span>
+                  <span className="text-gray-400">IVA (16%):</span>
                   <span className="text-white">{formatPrice(tax)}</span>
                 </div>
                 <div className="border-t border-gray-600 pt-3">

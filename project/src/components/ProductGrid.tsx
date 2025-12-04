@@ -40,15 +40,16 @@ const ProductGrid: React.FC<ProductGridProps> = ({
   };
 
   // Ordenar productos por prioridad:
-  // 1. Nuevos y destacados
-  // 2. Nuevos
-  // 3. Destacados
+  // 1. Oferta (original_price > price)
+  // 2. Destacado
+  // 3. Nuevo
   // 4. Normales
   const sortedProducts = [...products].sort((a, b) => {
     const getPriority = (p: Product) => {
-      if (p.is_new && p.is_featured) return 1;
-      if (p.is_new) return 2;
-      if (p.is_featured) return 3;
+      const isOffer = !!(p.original_price && p.original_price > p.price);
+      if (isOffer) return 1;
+      if (p.is_featured) return 2;
+      if (p.is_new) return 3;
       return 4;
     };
     return getPriority(a) - getPriority(b);
@@ -133,7 +134,7 @@ const ProductGrid: React.FC<ProductGridProps> = ({
             <p className="text-gray-500">Pronto tendremos nuevas piezas en esta categoría</p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 xs:grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-4 gap-14 sm:gap-8 lg:gap-6 w-full">
+          <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-4 gap-6 sm:gap-8 lg:gap-6 w-full">
             {sortedProducts.map((product) => (
               <div key={product.id} className="w-full h-full flex">
                 <ProductCard

@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Routes, Route, useNavigate, useLocation } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import Header from './components/Header';
@@ -22,6 +22,14 @@ import AdminPanel from './components/AdminPanel';
 import RequireUserAuth from './components/RequireUserAuth';
 import RequireWorker from './components/RequireWorker';
 import OrdersPage from './components/OrdersPage';
+import UserAddresses from './components/UserAddresses';
+import AboutUs from './pages/AboutUs';
+import JewelryCare from './pages/JewelryCare';
+import WarrantyPage from './pages/WarrantyPage';
+import PrivacyPolicy from './pages/PrivacyPolicy';
+import TermsOfService from './pages/TermsOfService';
+import ReturnsPolicy from './pages/ReturnsPolicy';
+import InvoiceHelp from './pages/InvoiceHelp';
 
 
 function App() {
@@ -170,6 +178,15 @@ function App() {
     );
   }, [products, categories, activeCategory]);
 
+  // Loading state simple
+  if (authLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-lg">Cargando...</div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-b from-black via-gray-900 to-black">
       <Header
@@ -194,7 +211,7 @@ function App() {
               loading={productsLoading}
               error={productsError}
             />
-            <div className="lg:w-3/4 mx-auto">
+            <div className="lg:w-3/4 mx-auto py-16">
               <NewsletterForm />
             </div>
           </main>
@@ -227,6 +244,12 @@ function App() {
             <OrdersPage />
           </RequireUserAuth>
         } />
+
+        <Route path="/addresses" element={
+          <RequireUserAuth>
+            <UserAddresses />
+          </RequireUserAuth>
+        } />
         
         <Route path="/admin" element={
           <RequireWorker>
@@ -238,6 +261,13 @@ function App() {
         <Route path="/success" element={<CheckoutSucessPage />} />
         <Route path="/cancel" element={<CheckoutCancelPage />} />
         <Route path="/unsubscribe" element={<UnsubscribePage />} />
+        <Route path="/sobre-nosotros" element={<AboutUs />} />
+        <Route path="/cuidado-de-joyas" element={<JewelryCare />} />
+        <Route path="/garantia" element={<WarrantyPage />} />
+        <Route path="/privacidad" element={<PrivacyPolicy />} />
+        <Route path="/terminos" element={<TermsOfService />} />
+        <Route path="/devoluciones" element={<ReturnsPolicy />} />
+        <Route path="/factura-tu-compra" element={<InvoiceHelp />} />
       </Routes>
 
       <Cart
@@ -272,7 +302,7 @@ function App() {
         onAuthRequired={handleAuthRequired}
       />
 
-      <Auth
+<Auth
         isOpen={isAuthOpen}
         mode={authMode}
         onClose={closeAuth}
@@ -301,6 +331,7 @@ function App() {
           }
         }}
         onSwitchMode={() => {
+          // ✅ Usa setAuthMode directamente
           if (authMode === 'login') {
             setAuthMode('register');
           } else if (authMode === 'register') {
@@ -334,4 +365,4 @@ function AppWrapper() {
   );
 }
 
-export default AppWrapper;
+export default React.memo(AppWrapper);

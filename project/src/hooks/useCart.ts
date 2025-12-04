@@ -89,7 +89,11 @@ export const useCart = () => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
-        setCartItems([]);
+        // Cargar carrito local
+        const local = localStorage.getItem('local_cart');
+        const localItems = local ? JSON.parse(local) : [];
+        const formatted = localItems.map((item: any) => formatCartItem(item));
+        setCartItems(formatted);
         return;
       }
 
@@ -130,17 +134,62 @@ export const useCart = () => {
     try {
       setError(null);
       const { data: { user } } = await supabase.auth.getUser();
-      
-      if (!user) {
-        throw new Error('You must be logged in to add items to cart');
-      }
 
       const stock = variant?.stock ?? product.stock ?? 0;
       if (stock <= 0) {
         throw new Error('This product is out of stock');
       }
 
-      // Obtener el carrito actual
+      // Carrito local si no hay usuario
+      if (!user) {
+        const local = localStorage.getItem('local_cart');
+        let currentItems: any[] = local ? JSON.parse(local) : [];
+        const existingItemIndex = currentItems.findIndex((item: any) => 
+          item.product_id === product.id && 
+          (item.variant_id === variant?.id || (!item.variant_id && !variant?.id))
+        );
+        if (existingItemIndex !== -1) {
+          currentItems[existingItemIndex].quantity += quantity;
+        } else {
+          currentItems.unshift({
+            id: `${product.id}-${variant?.id || 'base'}`,
+            cart_user_id: 'local',
+            product_id: product.id,
+            variant_id: variant?.id ?? null,
+            quantity,
+            price: variant?.price ?? product.price,
+            added_at: new Date().toISOString(),
+            product: {
+              id: product.id,
+              name: product.name,
+              price: variant?.price ?? product.price,
+              original_price: product.original_price,
+              image: variant?.image || product.image,
+              description: product.description,
+              material: product.material,
+              category_id: product.category_id,
+              stock: product.stock
+            },
+            variant: variant ? {
+              id: variant.id,
+              product_id: variant.product_id,
+              name: variant.name,
+              price: variant.price,
+              image: variant.image,
+              model: variant.model,
+              size: variant.size,
+              stock: variant.stock,
+              original_price: variant.original_price
+            } : undefined
+          });
+        }
+        localStorage.setItem('local_cart', JSON.stringify(currentItems));
+        const formattedItems = currentItems.map((i: any) => formatCartItem(i));
+        setCartItems(formattedItems);
+        return currentItems[existingItemIndex !== -1 ? existingItemIndex : 0];
+      }
+
+      // Obtener el carrito remoto
       const { data: currentCart, error: cartError } = await supabase
         .from('carts')
         .select('items')
@@ -155,10 +204,10 @@ export const useCart = () => {
         currentItems = currentCart.items;
       }
 
-      // Buscar si el item ya existe usando el ID compuesto
-      const itemId = `${product.id}-${variant?.id || 'base'}`;
+      // Buscar si el item ya existe usando product_id y variant_id
       const existingItemIndex = currentItems.findIndex((item: any) => 
-        item.id === itemId
+        item.product_id === product.id && 
+        (item.variant_id === variant?.id || (!item.variant_id && !variant?.id))
       );
 
       if (existingItemIndex !== -1) {
@@ -192,7 +241,7 @@ export const useCart = () => {
           },
           variant: variant ? {
             id: variant.id,
-            user_id: variant.product_id,
+            product_id: variant.product_id,
             name: variant.name,
             price: variant.price,
             image: variant.image,
@@ -242,7 +291,13 @@ export const useCart = () => {
       setError(null);
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
-        throw new Error('User not authenticated');
+        // Local
+        const local = localStorage.getItem('local_cart');
+        let currentItems: any[] = local ? JSON.parse(local) : [];
+        currentItems = currentItems.filter((item: any) => item.id !== itemId.toString());
+        localStorage.setItem('local_cart', JSON.stringify(currentItems));
+        setCartItems(currentItems.map((i: any) => formatCartItem(i)));
+        return;
       }
 
       // Obtener el carrito actual
@@ -300,7 +355,14 @@ export const useCart = () => {
 
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
-        throw new Error('User not authenticated');
+        // Local
+        const local = localStorage.getItem('local_cart');
+        let currentItems: any[] = local ? JSON.parse(local) : [];
+        const idx = currentItems.findIndex((i: any) => i.id === itemId.toString());
+        if (idx !== -1) currentItems[idx].quantity = quantity;
+        localStorage.setItem('local_cart', JSON.stringify(currentItems));
+        setCartItems(currentItems.map((i: any) => formatCartItem(i)));
+        return;
       }
 
       // Obtener el carrito actual
@@ -389,8 +451,39 @@ export const useCart = () => {
 
   // Efecto para cargar el carrito al montar y cuando cambia el usuario
   useEffect(() => {
-    const authListener = supabase.auth.onAuthStateChange((event) => {
-      if (event === 'SIGNED_IN' || event === 'SIGNED_OUT') {
+    const authListener = supabase.auth.onAuthStateChange(async (event) => {
+      if (event === 'SIGNED_IN') {
+        // Migrar carrito local
+        const local = localStorage.getItem('local_cart');
+        const localItems: any[] = local ? JSON.parse(local) : [];
+        if (localItems.length > 0) {
+          try {
+            for (const li of localItems) {
+              // Reconstruir producto/variant mínimos
+              const product: Product = {
+                id: li.product_id,
+                name: li.product?.name || 'Producto',
+                price: li.product?.price || li.price,
+                image: li.product?.image || '',
+                description: li.product?.description || '',
+                category_id: li.product?.category_id || 1,
+              } as any;
+              const variant: ProductVariant | undefined = li.variant_id ? {
+                id: li.variant_id,
+                product_id: li.product_id,
+                name: li.variant?.name || '',
+                price: li.variant?.price || li.price,
+              } as any : undefined;
+              await addToCart(product, li.quantity, variant);
+            }
+            localStorage.removeItem('local_cart');
+          } catch (e) {
+            console.error('Error migrando carrito local:', e);
+          }
+        }
+        loadCartItems();
+      }
+      if (event === 'SIGNED_OUT') {
         loadCartItems();
       }
     });

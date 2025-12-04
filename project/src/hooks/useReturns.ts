@@ -13,13 +13,36 @@ export const useReturns = () => {
         .from('returns')
         .select(`
           *,
-          order:orders(*, order_items(*, product:products(*))),
-          admin:auth.users(*)
+          order:orders(*, order_items(*, product:products(*)))
         `)
         .order('returned_at', { ascending: false });
 
       if (error) throw error;
-      setReturns(data || []);
+      
+      // Obtener información del admin por separado si existe
+      const returnsWithAdmin = await Promise.all(
+        (data || []).map(async (returnItem) => {
+          if (returnItem.admin_id) {
+            try {
+              const { data: adminData } = await supabase.auth.admin.getUserById(returnItem.admin_id);
+              return {
+                ...returnItem,
+                admin: adminData?.user ? {
+                  id: adminData.user.id,
+                  email: adminData.user.email,
+                  name: adminData.user.user_metadata?.name || adminData.user.email?.split('@')[0] || 'Admin'
+                } : null
+              };
+            } catch (adminError) {
+              console.error('Error obteniendo admin:', adminError);
+              return { ...returnItem, admin: null };
+            }
+          }
+          return { ...returnItem, admin: null };
+        })
+      );
+      
+      setReturns(returnsWithAdmin);
     } catch (error) {
       console.error('Error obteniendo devoluciones:', error);
     } finally {
@@ -29,12 +52,13 @@ export const useReturns = () => {
 
   const processReturn = async (orderId: number, reason?: string, adminId?: string) => {
     try {
-      // Llamar a la función de PostgreSQL para procesar la devolución
-      const { error: functionError } = await supabase.rpc('process_return', {
-        order_id_param: orderId
-      });
+      // Actualizar el estado de la orden a devuelto
+      const { error: orderError } = await supabase
+        .from('orders')
+        .update({ status: 'devuelto' })
+        .eq('id', orderId);
 
-      if (functionError) throw functionError;
+      if (orderError) throw orderError;
 
       // Crear registro de devolución
       const { error: insertError } = await supabase
@@ -64,13 +88,30 @@ export const useReturns = () => {
         .from('returns')
         .select(`
           *,
-          order:orders(*, order_items(*, product:products(*))),
-          admin:auth.users(*)
+          order:orders(*, order_items(*, product:products(*)))
         `)
         .eq('id', returnId)
         .single();
 
       if (error) throw error;
+      
+      // Obtener información del admin si existe
+      if (data.admin_id) {
+        try {
+          const { data: adminData } = await supabase.auth.admin.getUserById(data.admin_id);
+          data.admin = adminData?.user ? {
+            id: adminData.user.id,
+            email: adminData.user.email,
+            name: adminData.user.user_metadata?.name || adminData.user.email?.split('@')[0] || 'Admin'
+          } : null;
+        } catch (adminError) {
+          console.error('Error obteniendo admin:', adminError);
+          data.admin = null;
+        }
+      } else {
+        data.admin = null;
+      }
+      
       return data;
     } catch (error) {
       console.error('Error obteniendo devolución:', error);

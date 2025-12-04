@@ -29,10 +29,11 @@ export const useOrders = () => {
           addresses(*)
         `)
         .eq('user_id', user.id)
+        .neq('status', 'reserved')
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-      setOrders(data || []);
+      setOrders((data || []).filter(order => order.status !== 'reserved'));
     } catch (err) {
       console.error('Error cargando órdenes:', err);
       setError(err instanceof Error ? err.message : 'Error cargando órdenes');
@@ -64,7 +65,7 @@ export const useOrders = () => {
         .insert({
           user_id: user.id,
           total: orderData.total,
-          status: 'pendiente'
+          status: 'reserved'
         })
         .select()
         .single();

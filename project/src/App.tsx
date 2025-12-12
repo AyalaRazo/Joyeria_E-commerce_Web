@@ -211,7 +211,7 @@ function App() {
               loading={productsLoading}
               error={productsError}
             />
-            <div className="lg:w-3/4 mx-auto py-16">
+            <div className="lg:w-4/6 lg:px-0 px-8 mx-auto py-16">
               <NewsletterForm />
             </div>
           </main>

@@ -357,6 +357,16 @@ const shippingInfo = orderDetails
     }
   : null;
 
+  // Selección y generación de etiquetas de envío
+  const [selectedOrderIds, setSelectedOrderIds] = useState<number[]>([]);
+  const [showCourierModal, setShowCourierModal] = useState(false);
+  const [selectedCourierIdForLabels, setSelectedCourierIdForLabels] = useState<number | ''>('');
+  const [processingShipping, setProcessingShipping] = useState(false);
+  const [shippingStatusMessage, setShippingStatusMessage] = useState<string>('');
+  const [createdLabelIds, setCreatedLabelIds] = useState<number[]>([]);
+  const [processedLabels, setProcessedLabels] = useState<any[]>([]);
+  const [showPdfOptionsModal, setShowPdfOptionsModal] = useState(false);
+
 const fetchOrderDetails = async (orderId: number) => {
   try {
     let detailedOrder: any = null;
@@ -962,6 +972,224 @@ const fetchOrderDetails = async (orderId: number) => {
     }
   };
 
+  const toggleOrderSelection = (orderId: number) => {
+    setSelectedOrderIds(prev =>
+      prev.includes(orderId)
+        ? prev.filter(id => id !== orderId)
+        : [...prev, orderId]
+    );
+  };
+
+  const toggleSelectAllCurrentPage = (ordersPage: Order[]) => {
+    const pageIds = ordersPage.map(o => o.id as number);
+    const allSelected = pageIds.every(id => selectedOrderIds.includes(id));
+    if (allSelected) {
+      setSelectedOrderIds(prev => prev.filter(id => !pageIds.includes(id)));
+    } else {
+      setSelectedOrderIds(prev => Array.from(new Set([...prev, ...pageIds])));
+    }
+  };
+
+  const resetShippingFlow = () => {
+    setProcessingShipping(false);
+    setShippingStatusMessage('');
+    setCreatedLabelIds([]);
+    setProcessedLabels([]);
+    setShowCourierModal(false);
+    setShowPdfOptionsModal(false);
+  };
+
+  const handleOpenCourierModal = () => {
+    if (selectedOrderIds.length === 0) {
+      alert('Selecciona al menos una orden para generar etiquetas.');
+      return;
+    }
+    setSelectedCourierIdForLabels('');
+    setShowCourierModal(true);
+    setShippingStatusMessage('');
+  };
+
+  const handleCreateAndProcessShipping = async () => {
+    if (selectedOrderIds.length === 0) {
+      alert('Selecciona al menos una orden para generar etiquetas.');
+      return;
+    }
+    if (processingShipping) return;
+    try {
+      setProcessingShipping(true);
+      setShippingStatusMessage('Creando etiquetas...');
+      const token = (await supabase.auth.getSession()).data.session?.access_token;
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      const baseUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1`;
+
+      // Convertir courier_id: si es string vacío o falsy, usar null; si es número, usarlo
+      const courierId = selectedCourierIdForLabels === '' || !selectedCourierIdForLabels 
+        ? null 
+        : Number(selectedCourierIdForLabels);
+
+      const requestBody = {
+        order_ids: selectedOrderIds,
+        courier_id: courierId
+      };
+      
+      console.log('📦 Creando etiquetas:', { baseUrl, orderIds: selectedOrderIds, courierId, requestBody });
+      
+      const createResp = await fetch(`${baseUrl}/shipping-create`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(requestBody)
+      }).catch((fetchError) => {
+        console.error('❌ Error de fetch:', fetchError);
+        throw new Error(`Error de conexión: ${fetchError.message}. Verifica que el endpoint esté disponible y la URL sea correcta.`);
+      });
+
+      if (!createResp.ok) {
+        const errorText = await createResp.text();
+        let err;
+        try {
+          err = JSON.parse(errorText);
+        } catch {
+          err = { error: errorText || `Error HTTP ${createResp.status}: ${createResp.statusText}` };
+        }
+        console.error('❌ Error del servidor:', err);
+        throw new Error(err?.error || `Error al crear etiquetas (${createResp.status})`);
+      }
+
+      const createData = await createResp.json();
+      
+      // El endpoint devuelve { createdLabels: [...] }
+      // Cada elemento es { order_id, label: {...} } o { order_id, error: {...} }
+      const labelIds: number[] = [];
+      const createdLabels = createData?.createdLabels || [];
+      
+      createdLabels.forEach((entry: any) => {
+        if (entry.error) {
+          console.warn(`Error al crear etiqueta para orden ${entry.order_id}:`, entry.error);
+        } else if (entry.label && entry.label.id) {
+          labelIds.push(Number(entry.label.id));
+        }
+      });
+
+      if (labelIds.length === 0) {
+        throw new Error('No se generaron etiquetas. Verifica que las órdenes estén pagadas y sin tracking.');
+      }
+
+      setShippingStatusMessage(`Procesando ${labelIds.length} etiqueta(s)...`);
+
+      const processResp = await fetch(`${baseUrl}/shipping-process`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ label_ids: labelIds })
+      });
+
+      if (!processResp.ok) {
+        const errorText = await processResp.text();
+        let err;
+        try {
+          err = JSON.parse(errorText);
+        } catch {
+          err = { error: errorText || 'Error al procesar etiquetas' };
+        }
+        throw new Error(err?.error || 'Error al procesar etiquetas');
+      }
+
+      const processData = await processResp.json();
+      // El endpoint devuelve { processed: [...] }
+      const processed = processData?.processed || [];
+      
+      setCreatedLabelIds(labelIds);
+      setProcessedLabels(processed);
+      setShippingStatusMessage('Etiquetas procesadas. Elige cómo descargar el PDF.');
+      setShowCourierModal(false);
+      setShowPdfOptionsModal(true);
+      fetchOrders();
+    } catch (error) {
+      console.error('Error en flujo de envío:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Error desconocido';
+      alert(`Error en flujo de envío: ${errorMessage}`);
+      setShippingStatusMessage(`Error: ${errorMessage}`);
+    } finally {
+      setProcessingShipping(false);
+    }
+  };
+
+  const downloadPdfIndividual = async (labelId: number) => {
+    try {
+      setShippingStatusMessage(`Descargando PDF de etiqueta ${labelId}...`);
+      const token = (await supabase.auth.getSession()).data.session?.access_token;
+      const headers: Record<string, string> = {};
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      const baseUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1`;
+      // El endpoint espera el parámetro 'id', no 'label_id'
+      const resp = await fetch(`${baseUrl}/shipping-label-pdf?id=${labelId}`, {
+        method: 'GET',
+        headers
+      });
+      if (!resp.ok) {
+        const errorText = await resp.text();
+        let err;
+        try {
+          err = JSON.parse(errorText);
+        } catch {
+          err = { error: errorText || 'No se pudo obtener el PDF de la etiqueta' };
+        }
+        throw new Error(err?.error || 'No se pudo obtener el PDF de la etiqueta');
+      }
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `shipping-label-${labelId}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setShippingStatusMessage('PDF descargado.');
+    } catch (error) {
+      console.error('Error al descargar PDF individual:', error);
+      alert(`Error al descargar PDF: ${error instanceof Error ? error.message : 'Desconocido'}`);
+    }
+  };
+
+  const downloadPdfCombined = async () => {
+    if (!createdLabelIds.length) {
+      alert('No hay etiquetas procesadas para combinar.');
+      return;
+    }
+    try {
+      setShippingStatusMessage('Generando PDF combinado...');
+      const token = (await supabase.auth.getSession()).data.session?.access_token;
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      const baseUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1`;
+      const resp = await fetch(`${baseUrl}/shipping-labels-bulk`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ label_ids: createdLabelIds })
+      });
+      if (!resp.ok) {
+        const errorText = await resp.text();
+        let err;
+        try {
+          err = JSON.parse(errorText);
+        } catch {
+          err = { error: errorText || 'No se pudo generar el PDF combinado' };
+        }
+        throw new Error(err?.error || 'No se pudo generar el PDF combinado');
+      }
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'shipping-labels-combined.pdf';
+      a.click();
+      URL.revokeObjectURL(url);
+      setShippingStatusMessage('PDF combinado descargado.');
+    } catch (error) {
+      console.error('Error al descargar PDF combinado:', error);
+      alert(`Error al descargar PDF combinado: ${error instanceof Error ? error.message : 'Desconocido'}`);
+    }
+  };
+
   const fetchUsers = async () => {
     // Esta función se maneja en el hook useUserManagement
     // Solo recargamos la página para actualizar los datos
@@ -1230,7 +1458,7 @@ const fetchOrderDetails = async (orderId: number) => {
                   className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white"
                 >
                   <option value="all">Todos los estados</option>
-                  <option value="reserved">Pendiente (No pagado)</option>
+                  <option value="pendiente">Pendiente (No pagado)</option>
                   <option value="pagado">Pagado</option>
                   <option value="procesando">Procesando</option>
                   <option value="entregado">Entregado</option>
@@ -1336,6 +1564,16 @@ const fetchOrderDetails = async (orderId: number) => {
                 <span>Agregar Usuario</span>
               </button>
             )}
+            {activeTab === 'orders' && (
+              <button
+                onClick={handleOpenCourierModal}
+                disabled={processingShipping}
+                className="flex items-center space-x-2 px-4 py-2 bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg transition-colors"
+              >
+                <Truck className="h-4 w-4" />
+                <span>{processingShipping ? 'Procesando...' : 'Generar etiquetas'}</span>
+              </button>
+            )}
           </div>
         </div>
 
@@ -1409,19 +1647,49 @@ const fetchOrderDetails = async (orderId: number) => {
     </div>
 
     {/* 📈 Gráfico de evolución de ventas */}
-    <div className="bg-gray-800 rounded-lg p-6">
-      <h3 className="text-lg font-semibold text-white mb-4">Evolución de Ventas</h3>
-      <ResponsiveContainer width="100%" height={300}>
-        <LineChart data={dashboardData.salesSummary.slice().reverse()}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#444" />
-          <XAxis dataKey="date" stroke="#aaa" />
-          <YAxis stroke="#aaa" />
-          <Tooltip contentStyle={{ backgroundColor: '#1f2937', border: 'none' }} />
-          <Line type="monotone" dataKey="total_sales" stroke="#22c55e" strokeWidth={2} dot={false} />
-          <Line type="monotone" dataKey="total_orders" stroke="#3b82f6" strokeWidth={2} dot={false} />
-        </LineChart>
-      </ResponsiveContainer>
-    </div>
+<div className="bg-gray-800 rounded-lg p-6">
+  <h3 className="text-lg font-semibold text-white mb-4">Evolución de Ventas</h3>
+  <ResponsiveContainer width="100%" height={300}>
+    <LineChart data={dashboardData.salesSummary.slice().reverse()}>
+      <CartesianGrid strokeDasharray="3 3" stroke="#444" />
+      <XAxis 
+        dataKey="date" 
+        stroke="#aaa"
+        tickFormatter={(dateStr) => {
+          // Formatear la fecha a "MMM DD" (ej: "Ene 15", "Feb 28")
+          const date = new Date(dateStr);
+          return date.toLocaleDateString('es-ES', { 
+            month: 'short', 
+            day: 'numeric' 
+          });
+        }}
+        tick={{ fontSize: 12 }}
+      />
+      <YAxis stroke="#aaa" />
+      <Tooltip 
+        contentStyle={{ backgroundColor: '#1f2937', border: 'none' }}
+        formatter={(value, name) => {
+          const nameMap = {
+            total_sales: 'Ventas',
+            total_orders: 'Pedidos'
+          };
+          return [value, nameMap[name] || name];
+        }}
+        labelFormatter={(dateStr) => {
+          // Formatear también el tooltip para mostrar fecha completa
+          const date = new Date(dateStr);
+          return date.toLocaleDateString('es-ES', { 
+            year: 'numeric',
+            month: 'long', 
+            day: 'numeric' 
+          });
+        }}
+      />
+      <Line type="monotone" dataKey="total_sales" stroke="#22c55e" strokeWidth={2} dot={false} />
+      <Line type="monotone" dataKey="total_orders" stroke="#3b82f6" strokeWidth={2} dot={false} />
+    </LineChart>
+  </ResponsiveContainer>
+</div>
 
     
   </div>
@@ -1729,6 +1997,18 @@ const fetchOrderDetails = async (orderId: number) => {
 
         {activeTab === 'orders' && (
           <div className="bg-gray-800 rounded-lg overflow-hidden shadow-lg">
+            {(shippingStatusMessage || selectedOrderIds.length > 0) && (
+              <div className="px-6 pt-4 space-y-2">
+                {shippingStatusMessage && (
+                  <div className="text-sm text-yellow-300 bg-yellow-500/10 border border-yellow-500/20 rounded px-3 py-2">
+                    {shippingStatusMessage}
+                  </div>
+                )}
+                <div className="text-sm text-gray-300">
+                  Órdenes seleccionadas: {selectedOrderIds.length}
+                </div>
+              </div>
+            )}
             {loading.orders ? (
               <div className="flex justify-center items-center p-8">
                 <RefreshCw className="h-6 w-6 animate-spin text-yellow-400" />
@@ -1737,6 +2017,27 @@ const fetchOrderDetails = async (orderId: number) => {
               <table className="w-full">
                 <thead className="bg-gray-700">
                   <tr>
+                    <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider">
+                      {(() => {
+                        const currentPagination = pagination.orders;
+                        const startIndex = (currentPagination.page - 1) * currentPagination.limit;
+                        const endIndex = startIndex + currentPagination.limit;
+                        const currentPageOrders = filteredOrders.slice(startIndex, endIndex);
+                        const allSelected = currentPageOrders.length > 0 && currentPageOrders.every(o => selectedOrderIds.includes(o.id as number));
+                        const someSelected = currentPageOrders.some(o => selectedOrderIds.includes(o.id as number));
+                        return (
+                          <input
+                            type="checkbox"
+                            checked={allSelected}
+                            ref={el => {
+                              if (el) el.indeterminate = !allSelected && someSelected;
+                            }}
+                            onChange={() => toggleSelectAllCurrentPage(currentPageOrders)}
+                            aria-label="Seleccionar todas las órdenes de la página"
+                          />
+                        );
+                      })()}
+                    </th>
                     <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Orden ID</th>
                     <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Fecha</th>
                     <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Estado</th>
@@ -1755,6 +2056,14 @@ const fetchOrderDetails = async (orderId: number) => {
                     const paginatedOrders = filteredOrders.slice(startIndex, endIndex);
                     return paginatedOrders.map((order) => (
                     <tr key={order.id}>
+                      <td className="px-4 py-4 whitespace-nowrap">
+                        <input
+                          type="checkbox"
+                          checked={selectedOrderIds.includes(order.id as number)}
+                          onChange={() => toggleOrderSelection(order.id as number)}
+                          aria-label={`Seleccionar orden ${order.id}`}
+                        />
+                      </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="font-medium">#{order.id}</div>
                         <div className="text-gray-400 text-sm">
@@ -2094,54 +2403,7 @@ const fetchOrderDetails = async (orderId: number) => {
                 })()}
               </tbody>
             </table>
-            {(() => {
-              const currentPagination = pagination.couriers;
-              const totalRecords = couriers.length;
-              const totalPages = Math.max(1, Math.ceil(totalRecords / currentPagination.limit));
-              const startIndex = (currentPagination.page - 1) * currentPagination.limit;
-              const endIndex = startIndex + currentPagination.limit;
-
-              if (totalPages <= 1) return null;
-
-              return (
-                <div className="flex items-center justify-between px-6 py-3 bg-gray-700">
-                  <div className="text-sm text-gray-400">
-                    Mostrando {startIndex + 1} - {Math.min(endIndex, totalRecords)} de {totalRecords}
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <button
-                      onClick={() => {
-                        setPagination(prev => ({
-                          ...prev,
-                          couriers: { ...prev.couriers, page: prev.couriers.page - 1 }
-                        }));
-                        window.scrollTo(0, 0);
-                      }}
-                      disabled={currentPagination.page <= 1}
-                      className="px-3 py-1 bg-gray-600 hover:bg-gray-500 disabled:opacity-50 disabled:cursor-not-allowed rounded text-sm"
-                    >
-                      Anterior
-                    </button>
-                    <span className="text-sm text-gray-300">
-                      Página {currentPagination.page} de {totalPages}
-                    </span>
-                    <button
-                      onClick={() => {
-                        setPagination(prev => ({
-                          ...prev,
-                          couriers: { ...prev.couriers, page: prev.couriers.page + 1 }
-                        }));
-                        window.scrollTo(0, 0);
-                      }}
-                      disabled={currentPagination.page >= totalPages}
-                      className="px-3 py-1 bg-gray-600 hover:bg-gray-500 disabled:opacity-50 disabled:cursor-not-allowed rounded text-sm"
-                    >
-                      Siguiente
-                    </button>
-                  </div>
-                </div>
-              );
-            })()}
+            <PaginationControls type="couriers" filteredData={couriers} />
           </div>
         )}
 
@@ -3314,6 +3576,132 @@ const fetchOrderDetails = async (orderId: number) => {
                 </div>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Modal para elegir paquetería y crear/procesar etiquetas */}
+      {showCourierModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-gray-800 rounded-lg p-6 w-full max-w-md">
+            <h3 className="text-lg font-bold mb-4">Generar etiquetas de envío</h3>
+            <p className="text-sm text-gray-300 mb-3">
+              Seleccionaste {selectedOrderIds.length} orden(es). Primero crearemos las etiquetas y luego las procesaremos.
+            </p>
+            <div className="space-y-3">
+              <label className="block text-gray-300 text-sm">Paquetería</label>
+              <select
+                value={selectedCourierIdForLabels === '' ? '' : String(selectedCourierIdForLabels)}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setSelectedCourierIdForLabels(val === '' ? '' : Number(val));
+                }}
+                className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white"
+                disabled={processingShipping}
+              >
+                <option value="">Seleccionar (usar por defecto)</option>
+                {couriers.map(c => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+              <p className="text-xs text-gray-400">Si no seleccionas, se usará el courier por defecto configurado en la API.</p>
+            </div>
+            {shippingStatusMessage && (
+              <div className="mt-3 text-sm text-yellow-300 bg-yellow-500/10 border border-yellow-500/20 rounded px-3 py-2">
+                {shippingStatusMessage}
+              </div>
+            )}
+            <div className="flex justify-end space-x-2 mt-6">
+              <button
+                onClick={() => {
+                  resetShippingFlow();
+                  setSelectedOrderIds([]);
+                }}
+                className="px-4 py-2 bg-gray-600 hover:bg-gray-700 rounded"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleCreateAndProcessShipping}
+                disabled={processingShipping}
+                className="px-4 py-2 bg-green-600 hover:bg-green-700 rounded disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {processingShipping ? 'Procesando...' : 'Crear y procesar etiquetas'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal para elegir tipo de PDF */}
+      {showPdfOptionsModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-gray-800 rounded-lg p-6 w-full max-w-xl">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-bold">Descargar etiquetas</h3>
+              <button onClick={resetShippingFlow} className="text-gray-400 hover:text-white">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <p className="text-sm text-gray-300 mb-4">
+              Etiquetas procesadas: {createdLabelIds.length}. Elige si deseas un PDF por etiqueta o un PDF combinado.
+            </p>
+            {processedLabels && processedLabels.length > 0 && (
+              <div className="max-h-40 overflow-y-auto mb-4 space-y-2">
+                {processedLabels.map((pl: any) => {
+                  // El endpoint devuelve { label_id, label: {...} } o { label_id, error: {...} }
+                  const labelId = pl.label_id || pl.label?.id || pl.id;
+                  const label = pl.label || pl;
+                  const trackingNumber = label?.tracking_code || label?.api_response?.tracking_number || 'pendiente';
+                  
+                  if (pl.error) {
+                    return (
+                      <div key={labelId || pl.label_id} className="flex items-center justify-between bg-red-900/20 rounded px-3 py-2 text-sm text-red-300">
+                        <div>
+                          <div>Etiqueta ID: {pl.label_id}</div>
+                          <div className="text-xs text-red-400">Error: {pl.error?.message || 'Error desconocido'}</div>
+                        </div>
+                      </div>
+                    );
+                  }
+                  
+                  return (
+                    <div key={labelId} className="flex items-center justify-between bg-gray-700 rounded px-3 py-2 text-sm text-gray-200">
+                      <div>
+                        <div>Etiqueta ID: {labelId}</div>
+                        <div className="text-xs text-gray-400">
+                          Tracking: {trackingNumber}
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => downloadPdfIndividual(Number(labelId))}
+                        className="text-yellow-400 hover:text-yellow-300 text-xs underline"
+                      >
+                        PDF individual
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <button
+                onClick={downloadPdfCombined}
+                className="w-full sm:w-auto px-4 py-2 bg-yellow-600 hover:bg-yellow-700 rounded text-black font-medium"
+              >
+                Descargar PDF combinado
+              </button>
+              <button
+                onClick={() => {
+                  // Solo cierra, los botones individuales siguen disponibles arriba
+                  setShowPdfOptionsModal(false);
+                  setShippingStatusMessage('');
+                }}
+                className="w-full sm:w-auto px-4 py-2 bg-gray-600 hover:bg-gray-700 rounded text-white"
+              >
+                Cerrar
+              </button>
+            </div>
           </div>
         </div>
       )}

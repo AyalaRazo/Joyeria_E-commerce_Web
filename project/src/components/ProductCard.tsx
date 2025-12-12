@@ -101,10 +101,10 @@ const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
       {/* Información del producto */}
       <div className="p-5 sm:p-6 flex-1 flex flex-col">
         <div className="mb-3">
-          <h3 className="text-lg font-bold text-white mb-1 group-hover:text-gray-300 transition-colors duration-300 line-clamp-2">
+          <h3 className="text-base lg:text-lg font-bold text-white mb-1 group-hover:text-gray-300 transition-colors duration-300 line-clamp-2">
             {product.name}
           </h3>
-          <p className="text-sm font-medium tracking-wide text-yellow-400">
+          <p className="text-sm lg:text-sm font-medium tracking-wide text-yellow-400">
             {product.material}
           </p>
         </div>
@@ -132,11 +132,11 @@ const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
         <div className="mt-auto">
           {/* Precio actual y original en línea */}
           <div className="flex items-baseline gap-3 mb-1">
-            <span className="text-xl sm:text-2xl font-bold text-gray-300">
+            <span className="text-sm sm:text-xl font-bold text-gray-300">
               {formatPrice(displayPrice)}
             </span>
             {product.original_price && product.original_price > displayPrice && (
-              <span className="text-base text-gray-500 line-through">
+              <span className="text-xs sm:text-lg text-gray-500 line-through">
                 {formatPrice(product.original_price)}
               </span>
             )}

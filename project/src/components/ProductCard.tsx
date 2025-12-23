@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Product } from '../types';
 import { Star, Sparkles } from 'lucide-react';
+import { buildMediaUrl, isVideoUrl } from '../utils/storage';
 
 interface ProductCardProps {
   product: Product;
@@ -34,8 +35,9 @@ const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
     }).format(price);
   };
 
-  const displayImage = selectedVariant?.image || product.image;
+  const displayImage = buildMediaUrl(selectedVariant?.image || product.image);
   const displayPrice = selectedVariant?.price || product.price;
+  const isVideo = isVideoUrl(displayImage);
   const hasVariantStock = product.variants && product.variants.length > 0
     ? product.variants.some(variant => (variant.stock ?? 0) > 0)
     : false;
@@ -65,13 +67,24 @@ const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
       onClick={handleClick}
     >
 
-      {/* Imagen */}
+      {/* Imagen o Video */}
       <div className="relative w-full aspect-[3/4] sm:aspect-[4/5] overflow-hidden">
-        <img
-          src={displayImage}
-          alt={product.name}
-          className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700"
-        />
+        {isVideo ? (
+          <video
+            src={displayImage}
+            className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700"
+            muted
+            loop
+            playsInline
+            autoPlay
+          />
+        ) : (
+          <img
+            src={displayImage}
+            alt={product.name}
+            className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700"
+          />
+        )}
         <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
         
         <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity duration-500">

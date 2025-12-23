@@ -392,7 +392,7 @@ const OrdersPage: React.FC = () => {
                               href={trackingUrl}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="inline-flex items-center space-x-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
+                              className="inline-flex items-center space-x-2 px-4 py-2 bg-yellow-500 hover:bg-yellow-600 text-black rounded-lg transition-colors"
                             >
                               <ExternalLink className="h-4 w-4" />
                               <span>Rastrear envío</span>

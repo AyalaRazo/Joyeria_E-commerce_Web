@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Star, ArrowLeft, Heart } from 'lucide-react';
+import { Star, ArrowLeft, Heart, X, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { useCart } from '../hooks/useCart';
 import { supabase } from '../lib/supabase';
 import type { Product, ProductVariant, Review } from '../types';
+import { buildMediaUrl, isVideoUrl } from '../utils/storage';
 
 const ProductPage: React.FC = () => {
   const { id } = useParams();
@@ -21,6 +22,10 @@ const ProductPage: React.FC = () => {
   const [quantity, setQuantity] = useState(1);
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [isWishlisted, setIsWishlisted] = useState(false);
+  const [showImageModal, setShowImageModal] = useState(false);
+  const [modalImageIndex, setModalImageIndex] = useState(0);
+  const [touchStart, setTouchStart] = useState<number | null>(null);
+  const [touchEnd, setTouchEnd] = useState<number | null>(null);
   
   // Estados para reseñas
   const [reviews, setReviews] = useState<Review[]>([]);
@@ -256,12 +261,12 @@ const ProductPage: React.FC = () => {
       const variantImages: string[] = [];
       
       if (selectedVariant.image) {
-        variantImages.push(selectedVariant.image);
+        variantImages.push(buildMediaUrl(selectedVariant.image));
       }
       
       if (selectedVariant.variant_images?.length) {
         selectedVariant.variant_images.forEach(img => {
-          if (img.url) variantImages.push(img.url);
+          if (img.url) variantImages.push(buildMediaUrl(img.url));
         });
       }
       
@@ -271,16 +276,63 @@ const ProductPage: React.FC = () => {
     const productImages: string[] = [];
     
     if (product.image) {
-      productImages.push(product.image);
+      productImages.push(buildMediaUrl(product.image));
     }
     
     if (product.images?.length) {
       product.images.forEach(img => {
-        if (img.url) productImages.push(img.url);
+        if (img.url) productImages.push(buildMediaUrl(img.url));
       });
     }
     
     return productImages;
+  };
+
+  // Handlers para swipe en móvil
+  const minSwipeDistance = 50;
+
+  const onTouchStart = (e: React.TouchEvent) => {
+    setTouchEnd(null);
+    setTouchStart(e.targetTouches[0].clientX);
+  };
+
+  const onTouchMove = (e: React.TouchEvent) => {
+    setTouchEnd(e.targetTouches[0].clientX);
+  };
+
+  const onTouchEnd = () => {
+    if (!touchStart || !touchEnd) return;
+    
+    const distance = touchStart - touchEnd;
+    const isLeftSwipe = distance > minSwipeDistance;
+    const isRightSwipe = distance < -minSwipeDistance;
+    
+    const allImages = getAllImages();
+    
+    if (isLeftSwipe && modalImageIndex < allImages.length - 1) {
+      setModalImageIndex(modalImageIndex + 1);
+    }
+    if (isRightSwipe && modalImageIndex > 0) {
+      setModalImageIndex(modalImageIndex - 1);
+    }
+  };
+
+  const handleImageClick = () => {
+    setModalImageIndex(currentImageIndex);
+    setShowImageModal(true);
+  };
+
+  const handleModalNext = () => {
+    const allImages = getAllImages();
+    if (modalImageIndex < allImages.length - 1) {
+      setModalImageIndex(modalImageIndex + 1);
+    }
+  };
+
+  const handleModalPrev = () => {
+    if (modalImageIndex > 0) {
+      setModalImageIndex(modalImageIndex - 1);
+    }
   };
 
   const handleAddToCart = async () => {
@@ -367,7 +419,8 @@ const ProductPage: React.FC = () => {
 
   const currentPrice = selectedVariant ? selectedVariant.price : product.price;
   const allImages = getAllImages();
-  const currentImage = allImages[currentImageIndex] || product.image;
+  const currentImage = allImages[currentImageIndex] || buildMediaUrl(product.image);
+  const currentImageIsVideo = isVideoUrl(currentImage);
   const discountPercentage = product.original_price && product.original_price > currentPrice 
     ? Math.round(((product.original_price - currentPrice) / product.original_price) * 100)
     : 0;
@@ -451,30 +504,47 @@ const ProductPage: React.FC = () => {
           <div className="w-full flex flex-col items-center md:flex-row md:items-start gap-4">
             {allImages.length > 1 && (
               <div className="md:min-w-[5rem] flex md:flex-col gap-2 md:mr-4 mb-2 md:mb-0 overflow-x-auto md:overflow-y-auto md:max-h-80 max-w-full md:max-w-none scrollbar-thin scrollbar-thumb-gray-700 scrollbar-track-gray-900 relative" style={{ maxHeight: '450px' }}>
-                {allImages.map((img, idx) => (
-                  <button
-                    key={`${img}-${idx}`}
-                    onClick={() => setCurrentImageIndex(idx)}
-                    className={`border-2 rounded-lg overflow-hidden w-16 h-16 flex-shrink-0 flex items-center justify-center transition-all duration-200 ${
-                      idx === currentImageIndex
-                        ? 'border-yellow-400' 
-                        : 'border-gray-700'
-                    }`}
-                    style={{ background: '#111' }}
-                  >
-                    <img src={img} alt={`Vista ${idx + 1}`} className="object-contain w-full h-full" />
-                  </button>
-                ))}
+                {allImages.map((img, idx) => {
+                  const isVideo = isVideoUrl(img);
+                  return (
+                    <button
+                      key={`${img}-${idx}`}
+                      onClick={() => setCurrentImageIndex(idx)}
+                      className={`border-2 rounded-lg overflow-hidden w-16 h-16 flex-shrink-0 flex items-center justify-center transition-all duration-200 ${
+                        idx === currentImageIndex
+                          ? 'border-yellow-400' 
+                          : 'border-gray-700'
+                      }`}
+                      style={{ background: '#111' }}
+                    >
+                      {isVideo ? (
+                        <video src={img} className="object-contain w-full h-full" muted playsInline />
+                      ) : (
+                        <img src={img} alt={`Vista ${idx + 1}`} className="object-contain w-full h-full" />
+                      )}
+                    </button>
+                  );
+                })}
               </div>
             )}
             <div 
-              className="w-full max-w-md h-[28rem] flex items-center justify-center rounded-2xl shadow-2xl border-2 border-gray-800 bg-black mb-6 p-4"
+              className="w-full max-w-md h-[28rem] flex items-center justify-center rounded-2xl shadow-2xl border-2 border-gray-800 bg-black mb-6 p-4 cursor-pointer"
+              onClick={handleImageClick}
             >
-              <img
-                src={currentImage}
-                alt={product.name}
-                className="w-full h-full object-contain rounded-xl drop-shadow-xl"
-              />
+              {currentImageIsVideo ? (
+                <video
+                  src={currentImage}
+                  className="w-full h-full object-contain rounded-xl drop-shadow-xl"
+                  controls
+                  playsInline
+                />
+              ) : (
+                <img
+                  src={currentImage}
+                  alt={product.name}
+                  className="w-full h-full object-contain rounded-xl drop-shadow-xl"
+                />
+              )}
             </div>
           </div>
           
@@ -656,11 +726,22 @@ const ProductPage: React.FC = () => {
                       onClick={() => navigate(`/producto/${relatedProduct.id}`)}
                     >
                       <div className="h-48 bg-black flex items-center justify-center p-4">
-                        <img 
-                          src={relatedProduct.image} 
-                          alt={relatedProduct.name} 
-                          className="max-h-full max-w-full object-contain"
-                        />
+                        {isVideoUrl(relatedProduct.image) ? (
+                          <video 
+                            src={buildMediaUrl(relatedProduct.image)} 
+                            className="max-h-full max-w-full object-contain"
+                            muted
+                            playsInline
+                            loop
+                            autoPlay
+                          />
+                        ) : (
+                          <img 
+                            src={buildMediaUrl(relatedProduct.image)}
+                            alt={relatedProduct.name} 
+                            className="max-h-full max-w-full object-contain"
+                          />
+                        )}
                       </div>
                       <div className="p-4">
                         <h4 className="text-white font-semibold truncate">{relatedProduct.name}</h4>
@@ -769,6 +850,87 @@ const ProductPage: React.FC = () => {
           </div>
         )}
       </div>
+
+      {/* Modal de imágenes */}
+      {showImageModal && (
+        <div 
+          className="fixed inset-0 bg-black/95 z-50 flex items-center justify-center"
+          onClick={() => setShowImageModal(false)}
+          onTouchStart={onTouchStart}
+          onTouchMove={onTouchMove}
+          onTouchEnd={onTouchEnd}
+        >
+          <button
+            onClick={() => setShowImageModal(false)}
+            className="absolute top-4 right-4 z-10 text-white hover:text-gray-300 transition-colors"
+          >
+            <X className="h-8 w-8" />
+          </button>
+
+          {allImages.length > 1 && (
+            <>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleModalPrev();
+                }}
+                disabled={modalImageIndex === 0}
+                className="absolute left-4 z-10 text-white hover:text-gray-300 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+              >
+                <ChevronLeft className="h-12 w-12" />
+              </button>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleModalNext();
+                }}
+                disabled={modalImageIndex === allImages.length - 1}
+                className="absolute right-4 z-10 text-white hover:text-gray-300 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+              >
+                <ChevronRight className="h-12 w-12" />
+              </button>
+            </>
+          )}
+
+          <div 
+            className="relative w-full h-full flex items-center justify-center p-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {isVideoUrl(allImages[modalImageIndex]) ? (
+              <video
+                src={allImages[modalImageIndex]}
+                className="max-w-full max-h-full object-contain"
+                controls
+                autoPlay
+                playsInline
+              />
+            ) : (
+              <img
+                src={allImages[modalImageIndex]}
+                alt={`${product.name} - Vista ${modalImageIndex + 1}`}
+                className="max-w-full max-h-full object-contain"
+              />
+            )}
+          </div>
+
+          {allImages.length > 1 && (
+            <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 flex gap-2 z-10">
+              {allImages.map((_, idx) => (
+                <button
+                  key={idx}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setModalImageIndex(idx);
+                  }}
+                  className={`w-2 h-2 rounded-full transition-all ${
+                    idx === modalImageIndex ? 'bg-yellow-400 w-8' : 'bg-gray-600'
+                  }`}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 };

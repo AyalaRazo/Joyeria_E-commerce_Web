@@ -17,9 +17,18 @@ import {
 import { useUserManagement } from '../hooks/useUserManagement';
 import { useAuth } from '../hooks/useAuth';
 import { useProducts } from '../hooks/useProducts';
-import { uploadImageToProductsBucket } from '../utils/storage';
+import { uploadImageToProductsBucket, uploadVideoToProductsBucket, buildMediaUrl, isVideoUrl } from '../utils/storage';
 
 const AdminPanel: React.FC = () => {
+  type ShippingPackage = {
+    id: number;
+    name: string;
+    empty_weight_grams: number;
+    length_cm: number;
+    width_cm: number;
+    height_cm: number;
+    is_active: boolean;
+  };
   const { user, isAdmin, refreshUserRole } = useAuth();
   // const { returns, processReturn } = useReturns();
   const [returns, setReturns] = useState<any[]>([]);
@@ -29,7 +38,7 @@ const AdminPanel: React.FC = () => {
   const canManageCouriers = isAdmin();
   const canViewCouriers = canManageCouriers || userRole === 'worker';
 
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'products' | 'orders' | 'returns' | 'users' | 'couriers'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'products' | 'orders' | 'returns' | 'users' | 'couriers' | 'packages'>('dashboard');
   const [products, setProducts] = useState<Product[]>([]);
   const [variants, setVariants] = useState<Record<string | number, ProductVariant[]>>({});
   const [orders, setOrders] = useState<Order[]>([]);
@@ -38,7 +47,8 @@ const AdminPanel: React.FC = () => {
     products: true,
     orders: true,
     returns: false,
-    users: false
+    users: false,
+    packages: false
   });
   const [searchTerm, setSearchTerm] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<number | 'all'>('all');
@@ -56,7 +66,8 @@ const AdminPanel: React.FC = () => {
     orders: { page: 1, limit: 10, total: 0 },
     returns: { page: 1, limit: 10, total: 0 },
     users: { page: 1, limit: 10, total: 0 },
-    couriers: { page: 1, limit: 10, total: 0 }
+    couriers: { page: 1, limit: 10, total: 0 },
+    packages: { page: 1, limit: 10, total: 0 }
   });
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [editingStock, setEditingStock] = useState<{
@@ -75,6 +86,8 @@ const AdminPanel: React.FC = () => {
   const [showAddProduct, setShowAddProduct] = useState(false);
   const [productMainImageFile, setProductMainImageFile] = useState<File | null>(null);
   const [productGalleryFiles, setProductGalleryFiles] = useState<FileList | null>(null);
+  const [productMainVideoFile, setProductMainVideoFile] = useState<File | null>(null);
+  const [productGalleryVideos, setProductGalleryVideos] = useState<FileList | null>(null);
   const [showReturnModal, setShowReturnModal] = useState<{
     show: boolean;
     orderId: number | null;
@@ -103,13 +116,17 @@ const AdminPanel: React.FC = () => {
     has_warranty: false,
     warranty_period: undefined as number | undefined,
     warranty_unit: undefined as string | undefined,
-    warranty_description: undefined as string | undefined
+    warranty_description: undefined as string | undefined,
+    weight_grams: 100,
+    is_high_value: false,
+    requires_special_shipping: false
   });
   const [showAddUser, setShowAddUser] = useState(false);
   const [newUser, setNewUser] = useState({
     email: '',
     role: 'worker' as UserRole
   });
+  const [showAddPackage, setShowAddPackage] = useState(false);
 
   // Variants state
   const [showAddVariant, setShowAddVariant] = useState<{
@@ -141,6 +158,7 @@ const AdminPanel: React.FC = () => {
   const [editingProductGalleryFiles, setEditingProductGalleryFiles] = useState<FileList | null>(null);
   const [newVariantGalleryFiles, setNewVariantGalleryFiles] = useState<FileList | null>(null);
   const [editingVariantGalleryFiles, setEditingVariantGalleryFiles] = useState<FileList | null>(null);
+  const gallerySuffix = (base: string, index: number) => `${base}_${index + 1}`;
 
   // Estados para dashboard
   const [dashboardData, setDashboardData] = useState<{
@@ -168,12 +186,15 @@ const AdminPanel: React.FC = () => {
     orderId: number;
     courierId: number;
   } | null>(null);
-  const [showAddCourier, setShowAddCourier] = useState(false);
-  const [editingCourierData, setEditingCourierData] = useState<Courier | null>(null);
-  const [newCourier, setNewCourier] = useState({
+  const [packages, setPackages] = useState<ShippingPackage[]>([]);
+  const [editingPackage, setEditingPackage] = useState<ShippingPackage | null>(null);
+  const [newPackage, setNewPackage] = useState<Partial<ShippingPackage>>({
     name: '',
-    url: '',
-    logo: ''
+    empty_weight_grams: 0,
+    length_cm: 0,
+    width_cm: 0,
+    height_cm: 0,
+    is_active: true
   });
 
   // Estados para detalles de orden
@@ -186,7 +207,7 @@ const AdminPanel: React.FC = () => {
   // Fetch data based on active tab
   useEffect(() => {
     // Si no es admin, ocultar tabs restringidas
-    if (!isAdmin() && (activeTab === 'dashboard' || activeTab === 'users')) {
+    if (!isAdmin() && (activeTab === 'dashboard' || activeTab === 'users' || activeTab === 'packages')) {
       setActiveTab('orders');
       return;
     }
@@ -202,6 +223,7 @@ const AdminPanel: React.FC = () => {
       case 'orders':
         fetchCouriers();
         fetchOrders();
+        fetchPackages();
         break;
       case 'returns':
         fetchReturns();
@@ -212,6 +234,9 @@ const AdminPanel: React.FC = () => {
         break;
       case 'couriers':
         fetchCouriers();
+        break;
+      case 'packages':
+        fetchPackages();
         break;
     }
   }, [activeTab]);
@@ -235,76 +260,90 @@ const AdminPanel: React.FC = () => {
     }
   };
 
-  const handleAddCourier = async () => {
+  const fetchPackages = async () => {
     try {
-      if (!newCourier.name.trim()) {
-        alert('El nombre de la paquetería es requerido');
-        return;
-      }
-
-      const { error } = await supabase
-        .from('couriers')
-        .insert([{
-          name: newCourier.name.trim(),
-          url: newCourier.url.trim() || null,
-          logo: newCourier.logo.trim() || null
-        }]);
+      setLoading(prev => ({ ...prev, packages: true }));
+      const { data, error } = await supabase
+        .from('shipping_packages')
+        .select('*')
+        .order('name');
 
       if (error) throw error;
-
-      setNewCourier({ name: '', url: '', logo: '' });
-      setShowAddCourier(false);
-      fetchCouriers();
+      setPackages((data as ShippingPackage[]) || []);
     } catch (error) {
-      console.error('Error adding courier:', error);
-      alert('Error al agregar la paquetería');
+      console.error('Error fetching packages:', error);
+    } finally {
+      setLoading(prev => ({ ...prev, packages: false }));
     }
   };
 
-  const handleEditCourier = async () => {
-    if (!editingCourierData) return;
-
+  const handleAddPackage = async () => {
     try {
-      if (!editingCourierData.name.trim()) {
-        alert('El nombre de la paquetería es requerido');
+      if (!newPackage.name?.trim()) {
+        alert('El nombre del paquete es obligatorio.');
         return;
       }
+      const { error } = await supabase.from('shipping_packages').insert([{
+        name: newPackage.name,
+        empty_weight_grams: Number(newPackage.empty_weight_grams) || 0,
+        length_cm: Number(newPackage.length_cm) || 0,
+        width_cm: Number(newPackage.width_cm) || 0,
+        height_cm: Number(newPackage.height_cm) || 0,
+        is_active: newPackage.is_active ?? true
+      }]);
+      if (error) throw error;
+      setNewPackage({
+        name: '',
+        empty_weight_grams: 0,
+        length_cm: 0,
+        width_cm: 0,
+        height_cm: 0,
+        is_active: true
+      });
+      fetchPackages();
+      alert('Paquete creado correctamente.');
+    } catch (error) {
+      console.error('Error creating package:', error);
+      alert('No se pudo crear el paquete.');
+    }
+  };
 
+  const handleUpdatePackage = async () => {
+    if (!editingPackage) return;
+    try {
       const { error } = await supabase
-        .from('couriers')
+        .from('shipping_packages')
         .update({
-          name: editingCourierData.name.trim(),
-          url: editingCourierData.url?.trim() || null,
-          logo: editingCourierData.logo?.trim() || null
+          name: editingPackage.name,
+          empty_weight_grams: Number(editingPackage.empty_weight_grams) || 0,
+          length_cm: Number(editingPackage.length_cm) || 0,
+          width_cm: Number(editingPackage.width_cm) || 0,
+          height_cm: Number(editingPackage.height_cm) || 0,
+          is_active: editingPackage.is_active
         })
-        .eq('id', editingCourierData.id);
-
+        .eq('id', editingPackage.id);
       if (error) throw error;
-
-      setEditingCourierData(null);
-      fetchCouriers();
+      setEditingPackage(null);
+      fetchPackages();
+      alert('Paquete actualizado.');
     } catch (error) {
-      console.error('Error updating courier:', error);
-      alert('Error al actualizar la paquetería');
+      console.error('Error updating package:', error);
+      alert('No se pudo actualizar el paquete.');
     }
   };
 
-  const handleDeleteCourier = async (courierId: number) => {
-    if (!confirm('¿Estás seguro de que quieres eliminar esta paquetería?')) return;
-
+  const handleDeletePackage = async (id: number) => {
+    if (!confirm('¿Eliminar paquete?')) return;
     try {
-      const { error } = await supabase
-        .from('couriers')
-        .delete()
-        .eq('id', courierId);
-
+      const { error } = await supabase.from('shipping_packages').delete().eq('id', id);
       if (error) throw error;
-      fetchCouriers();
+      fetchPackages();
     } catch (error) {
-      console.error('Error deleting courier:', error);
-      alert('Error al eliminar la paquetería');
+      console.error('Error deleting package:', error);
+      alert('No se pudo eliminar el paquete.');
     }
   };
+
 
   const fetchDashboardData = async (customFilter?: { startDate?: string; endDate?: string }) => {
     setLoading(prev => ({ ...prev, dashboard: true }));
@@ -361,6 +400,7 @@ const shippingInfo = orderDetails
   const [selectedOrderIds, setSelectedOrderIds] = useState<number[]>([]);
   const [showCourierModal, setShowCourierModal] = useState(false);
   const [selectedCourierIdForLabels, setSelectedCourierIdForLabels] = useState<number | ''>('');
+  const [selectedPackageIdForLabels, setSelectedPackageIdForLabels] = useState<number | ''>('');
   const [processingShipping, setProcessingShipping] = useState(false);
   const [shippingStatusMessage, setShippingStatusMessage] = useState<string>('');
   const [createdLabelIds, setCreatedLabelIds] = useState<number[]>([]);
@@ -446,6 +486,7 @@ const fetchOrderDetails = async (orderId: number) => {
       const { data, error, count } = await supabase
         .from('returns')
         .select('*', { count: 'exact' })
+        .eq('status', 'processed')
         .order('returned_at', { ascending: false })
         .range(from, to);
 
@@ -608,33 +649,58 @@ const fetchOrderDetails = async (orderId: number) => {
 
   const handleAddProduct = async () => {
     try {
-      // Upload main image if provided
+      if (!newProduct.name.trim()) {
+        alert('El nombre del producto es requerido.');
+        return;
+      }
+
+      // Upload main image or video if provided
       let mainImageUrl = newProduct.image;
       if (productMainImageFile) {
         const categoryName = categories.find(c => c.id === newProduct.category_id)?.name || 'sin_categoria';
-        mainImageUrl = await uploadImageToProductsBucket(productMainImageFile, categoryName);
+        mainImageUrl = await uploadImageToProductsBucket(productMainImageFile, categoryName, newProduct.name);
+      } else if (productMainVideoFile) {
+        const categoryName = categories.find(c => c.id === newProduct.category_id)?.name || 'sin_categoria';
+        mainImageUrl = await uploadVideoToProductsBucket(productMainVideoFile, categoryName, newProduct.name);
       }
       if (!mainImageUrl) {
-        alert('Selecciona una imagen principal para el producto.');
+        alert('Selecciona una imagen o video principal para el producto.');
         return;
       }
 
       const { data: inserted, error } = await supabase
         .from('products')
-        .insert([{ ...newProduct, image: mainImageUrl }])
+        .insert([{ 
+          ...newProduct, 
+          image: mainImageUrl,
+          weight_grams: newProduct.weight_grams || 100,
+          is_high_value: newProduct.is_high_value || false,
+          requires_special_shipping: newProduct.requires_special_shipping || false
+        }])
         .select('*')
         .single();
 
       if (error) throw error;
 
-      // Upload gallery images to product_images
-      if (inserted && productGalleryFiles && productGalleryFiles.length > 0) {
+      // Upload gallery images and videos to product_images
+      if (inserted && (productGalleryFiles || productGalleryVideos)) {
         const categoryName = categories.find(c => c.id === newProduct.category_id)?.name || 'sin_categoria';
         const urls: string[] = [];
-        for (const file of Array.from(productGalleryFiles)) {
-          const url = await uploadImageToProductsBucket(file, categoryName);
-          urls.push(url);
+        
+        if (productGalleryFiles) {
+          for (const [idx, file] of Array.from(productGalleryFiles).entries()) {
+            const url = await uploadImageToProductsBucket(file, categoryName, newProduct.name, gallerySuffix('galeria', idx));
+            urls.push(url);
+          }
         }
+        
+        if (productGalleryVideos) {
+          for (const [idx, file] of Array.from(productGalleryVideos).entries()) {
+            const url = await uploadVideoToProductsBucket(file, categoryName, newProduct.name, gallerySuffix('video', idx));
+            urls.push(url);
+          }
+        }
+        
         const rows = urls.map((url, idx) => ({ product_id: inserted.id, url, ordering: idx }));
         await supabase.from('product_images').insert(rows);
       }
@@ -654,24 +720,33 @@ const fetchOrderDetails = async (orderId: number) => {
         has_warranty: false,
         warranty_period: undefined,
         warranty_unit: undefined,
-        warranty_description: undefined
+        warranty_description: undefined,
+        weight_grams: 100,
+        is_high_value: false,
+        requires_special_shipping: false
       });
       setShowAddProduct(false);
       setProductMainImageFile(null);
       setProductGalleryFiles(null);
+      setProductMainVideoFile(null);
+      setProductGalleryVideos(null);
       fetchProducts();
     } catch (error) {
       console.error('Error adding product:', error);
+      alert('Error al agregar el producto. Verifica que el nombre sea único y que todos los campos estén correctos.');
     }
   };
 
   const handleEditProduct = async (product: Product) => {
     try {
-      // Optionally replace main image if a file was selected via hidden state per product (reuse productMainImageFile for simplicity)
+      // Optionally replace main image or video if a file was selected
       let updatedImage = product.image;
       if (productMainImageFile) {
         const categoryName = categories.find(c => c.id === product.category_id)?.name || 'sin_categoria';
-        updatedImage = await uploadImageToProductsBucket(productMainImageFile, categoryName);
+        updatedImage = await uploadImageToProductsBucket(productMainImageFile, categoryName, product.name);
+      } else if (productMainVideoFile) {
+        const categoryName = categories.find(c => c.id === product.category_id)?.name || 'sin_categoria';
+        updatedImage = await uploadVideoToProductsBucket(productMainVideoFile, categoryName, product.name);
       }
 
       const { error } = await supabase
@@ -687,20 +762,34 @@ const fetchOrderDetails = async (orderId: number) => {
           stock: product.stock,
           in_stock: product.in_stock,
           is_new: product.is_new,
-          is_featured: product.is_featured
+          is_featured: product.is_featured,
+          weight_grams: product.weight_grams ?? 100,
+          is_high_value: product.is_high_value ?? false,
+          requires_special_shipping: product.requires_special_shipping ?? false
         })
         .eq('id', product.id);
 
       if (error) throw error;
 
-      if (editingProductGalleryFiles && editingProductGalleryFiles.length > 0) {
+      if ((editingProductGalleryFiles && editingProductGalleryFiles.length > 0) || (productGalleryVideos && productGalleryVideos.length > 0)) {
         const existingCount = product.images?.length || 0;
         const categoryName = categories.find(c => c.id === product.category_id)?.name || 'sin_categoria';
         const urls: string[] = [];
-        for (const file of Array.from(editingProductGalleryFiles)) {
-          const url = await uploadImageToProductsBucket(file, categoryName);
-          urls.push(url);
+        
+        if (editingProductGalleryFiles) {
+          for (const [idx, file] of Array.from(editingProductGalleryFiles).entries()) {
+            const url = await uploadImageToProductsBucket(file, categoryName, product.name, gallerySuffix('galeria', existingCount + idx));
+            urls.push(url);
+          }
         }
+        
+        if (productGalleryVideos) {
+          for (const [idx, file] of Array.from(productGalleryVideos).entries()) {
+            const url = await uploadVideoToProductsBucket(file, categoryName, product.name, gallerySuffix('video', existingCount + idx));
+            urls.push(url);
+          }
+        }
+        
         const rows = urls.map((url, idx) => ({
           product_id: product.id,
           url,
@@ -711,10 +800,13 @@ const fetchOrderDetails = async (orderId: number) => {
 
       setEditingProduct(null);
       setProductMainImageFile(null);
+      setProductMainVideoFile(null);
       setEditingProductGalleryFiles(null);
+      setProductGalleryVideos(null);
       fetchProducts();
     } catch (error) {
       console.error('Error updating product:', error);
+      alert('Error al actualizar el producto.');
     }
   };
 
@@ -724,8 +816,9 @@ const fetchOrderDetails = async (orderId: number) => {
       let imageUrl: string | null = null;
       const parentProduct = products.find(p => p.id === showAddVariant.productId);
       const categoryName = categories.find(c => c.id === (parentProduct?.category_id || 1))?.name || 'sin_categoria';
+      const productName = parentProduct?.name || 'variante';
       if (newVariant.imageFile) {
-        imageUrl = await uploadImageToProductsBucket(newVariant.imageFile, categoryName);
+        imageUrl = await uploadImageToProductsBucket(newVariant.imageFile, categoryName, productName, `variante_${newVariant.name || 'variante'}`);
       }
 
       const { data: insertedVariant, error } = await supabase
@@ -747,8 +840,8 @@ const fetchOrderDetails = async (orderId: number) => {
 
       if (insertedVariant && newVariantGalleryFiles && newVariantGalleryFiles.length > 0) {
         const urls: string[] = [];
-        for (const file of Array.from(newVariantGalleryFiles)) {
-          const url = await uploadImageToProductsBucket(file, categoryName);
+        for (const [idx, file] of Array.from(newVariantGalleryFiles).entries()) {
+          const url = await uploadImageToProductsBucket(file, categoryName, productName, gallerySuffix('variante', idx));
           urls.push(url);
         }
         const rows = urls.map((url, idx) => ({
@@ -775,7 +868,8 @@ const fetchOrderDetails = async (orderId: number) => {
       if (editingVariantImageFile) {
         const p = products.find(p => p.id === editingVariant.product_id);
         const categoryName = categories.find(c => c.id === (p?.category_id || 1))?.name || 'sin_categoria';
-        imageUrl = await uploadImageToProductsBucket(editingVariantImageFile, categoryName);
+        const productName = p?.name || 'variante';
+        imageUrl = await uploadImageToProductsBucket(editingVariantImageFile, categoryName, productName, `variante_${editingVariant.name}`);
       }
 
       const { error } = await supabase
@@ -798,10 +892,11 @@ const fetchOrderDetails = async (orderId: number) => {
       if (editingVariantGalleryFiles && editingVariantGalleryFiles.length > 0) {
         const parentProduct = products.find(p => p.id === editingVariant.product_id);
         const categoryName = categories.find(c => c.id === (parentProduct?.category_id || 1))?.name || 'sin_categoria';
+        const productName = parentProduct?.name || 'variante';
         const startIndex = editingVariant.variant_images?.length || 0;
         const urls: string[] = [];
-        for (const file of Array.from(editingVariantGalleryFiles)) {
-          const url = await uploadImageToProductsBucket(file, categoryName);
+        for (const [idx, file] of Array.from(editingVariantGalleryFiles).entries()) {
+          const url = await uploadImageToProductsBucket(file, categoryName, productName, gallerySuffix('variante', startIndex + idx));
           urls.push(url);
         }
         const rows = urls.map((url, idx) => ({
@@ -993,6 +1088,7 @@ const fetchOrderDetails = async (orderId: number) => {
     setProcessedLabels([]);
     setShowCourierModal(false);
     setShowPdfOptionsModal(false);
+    setSelectedPackageIdForLabels('');
   };
 
   const handleOpenCourierModal = () => {
@@ -1001,6 +1097,8 @@ const fetchOrderDetails = async (orderId: number) => {
       return;
     }
     setSelectedCourierIdForLabels('');
+    const firstActivePackage = packages.find(p => p.is_active);
+    setSelectedPackageIdForLabels(firstActivePackage ? firstActivePackage.id : '');
     setShowCourierModal(true);
     setShippingStatusMessage('');
   };
@@ -1008,6 +1106,10 @@ const fetchOrderDetails = async (orderId: number) => {
   const handleCreateAndProcessShipping = async () => {
     if (selectedOrderIds.length === 0) {
       alert('Selecciona al menos una orden para generar etiquetas.');
+      return;
+    }
+    if (!selectedPackageIdForLabels) {
+      alert('Selecciona un paquete de envío.');
       return;
     }
     if (processingShipping) return;
@@ -1026,7 +1128,8 @@ const fetchOrderDetails = async (orderId: number) => {
 
       const requestBody = {
         order_ids: selectedOrderIds,
-        courier_id: courierId
+        courier_id: courierId,
+        shipping_package_id: selectedPackageIdForLabels
       };
       
       console.log('📦 Creando etiquetas:', { baseUrl, orderIds: selectedOrderIds, courierId, requestBody });
@@ -1242,6 +1345,9 @@ const fetchOrderDetails = async (orderId: number) => {
   });
 
   const filteredReturns = returns.filter(ret => {
+    // Solo mostrar returns procesados (ya filtrado en fetchReturns, pero por si acaso)
+    if (ret.status !== 'processed') return false;
+    
     const matchesSearch = ret.id.toString().includes(searchTerm.toLowerCase()) ||
       ret.order_id.toString().includes(searchTerm.toLowerCase());
 
@@ -1267,6 +1373,9 @@ const fetchOrderDetails = async (orderId: number) => {
     userItem.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
     (userItem.name && userItem.name.toLowerCase().includes(searchTerm.toLowerCase()))
   );
+  const filteredPackages = packages.filter(pkg =>
+    pkg.name.toLowerCase().includes(searchTerm.toLowerCase())
+  );
 
   // Resetear paginación cuando cambian los filtros
   useEffect(() => {
@@ -1276,13 +1385,14 @@ const fetchOrderDetails = async (orderId: number) => {
       orders: { ...prev.orders, page: 1 },
       returns: { ...prev.returns, page: 1 },
       users: { ...prev.users, page: 1 },
-      couriers: { ...prev.couriers, page: 1 }
+      couriers: { ...prev.couriers, page: 1 },
+      packages: { ...prev.packages, page: 1 }
     }));
   }, [statusFilter, submittedFilter, dateFilter.startDate, dateFilter.endDate, searchTerm, categoryFilter]);
 
   // Componente de paginación - ahora funciona con datos filtrados
   const PaginationControls = ({ type, filteredData, onPageChange }: { 
-    type: 'products' | 'orders' | 'returns' | 'users' | 'couriers';
+    type: 'products' | 'orders' | 'returns' | 'users' | 'couriers' | 'packages';
     filteredData: any[];
     onPageChange?: (page: number) => void;
   }) => {
@@ -1408,6 +1518,14 @@ const fetchOrderDetails = async (orderId: number) => {
               onClick={() => setActiveTab('couriers')}
             >
               Paqueterías
+            </button>
+          )}
+          {isAdmin() && (
+            <button
+              className={`px-4 py-2 font-medium ${activeTab === 'packages' ? 'text-yellow-400 border-b-2 border-yellow-400' : 'text-gray-400 hover:text-gray-300'}`}
+              onClick={() => setActiveTab('packages')}
+            >
+              Paquetes
             </button>
           )}
         </div>
@@ -1545,7 +1663,7 @@ const fetchOrderDetails = async (orderId: number) => {
             {activeTab === 'products' && isAdmin() && (
               <button
                 onClick={() => setShowAddProduct(true)}
-                className="flex items-center space-x-2 px-4 py-2 bg-yellow-600 hover:bg-yellow-700 text-white rounded-lg transition-colors"
+                className="flex items-center space-x-2 px-4 py-2 bg-yellow-500 hover:bg-yellow-600 text-black rounded-lg transition-colors"
               >
                 <Plus className="h-4 w-4" />
                 <span>Agregar Producto</span>
@@ -1554,17 +1672,26 @@ const fetchOrderDetails = async (orderId: number) => {
             {activeTab === 'users' && isAdmin() && (
               <button
                 onClick={() => setShowAddUser(true)}
-                className="flex items-center space-x-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
+                className="flex items-center space-x-2 px-4 py-2 bg-yellow-500 hover:bg-yellow-600 text-black rounded-lg transition-colors"
               >
                 <Plus className="h-4 w-4" />
                 <span>Agregar Usuario</span>
+              </button>
+            )}
+            {activeTab === 'packages' && isAdmin() && (
+              <button
+                onClick={() => setShowAddPackage(true)}
+                className="flex items-center space-x-2 px-4 py-2 bg-yellow-500 hover:bg-yellow-600 text-black rounded-lg transition-colors"
+              >
+                <Plus className="h-4 w-4" />
+                <span>Agregar Paquete</span>
               </button>
             )}
             {activeTab === 'orders' && (
               <button
                 onClick={handleOpenCourierModal}
                 disabled={processingShipping}
-                className="flex items-center space-x-2 px-4 py-2 bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg transition-colors"
+                className="flex items-center space-x-2 px-4 py-2 bg-yellow-500 hover:bg-yellow-600 disabled:opacity-50 disabled:cursor-not-allowed text-black rounded-lg transition-colors"
               >
                 <Truck className="h-4 w-4" />
                 <span>{processingShipping ? 'Procesando...' : 'Generar etiquetas'}</span>
@@ -1665,11 +1792,11 @@ const fetchOrderDetails = async (orderId: number) => {
       <Tooltip 
         contentStyle={{ backgroundColor: '#1f2937', border: 'none' }}
         formatter={(value, name) => {
-          const nameMap = {
+          const nameMap: Record<string, string> = {
             total_sales: 'Ventas',
             total_orders: 'Pedidos'
           };
-          return [value, nameMap[name] || name];
+          return [value, nameMap[name as string] || name];
         }}
         labelFormatter={(dateStr) => {
           // Formatear también el tooltip para mostrar fecha completa
@@ -1721,11 +1848,20 @@ const fetchOrderDetails = async (orderId: number) => {
                       <tr>
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="flex items-center">
-                            <img
-                              src={product.image}
-                              alt={product.name}
-                              className="h-10 w-10 rounded-md object-cover"
-                            />
+        {isVideoUrl(product.image) ? (
+          <video
+            src={buildMediaUrl(product.image)}
+                                className="h-10 w-10 rounded-md object-cover"
+                                muted
+                                playsInline
+                              />
+                            ) : (
+          <img
+            src={buildMediaUrl(product.image)}
+                                alt={product.name}
+                                className="h-10 w-10 rounded-md object-cover"
+                              />
+                            )}
                             <div className="ml-4">
                               <div className="font-medium">{product.name}</div>
                               <div className="text-gray-400 text-sm">ID: {product.id}</div>
@@ -1837,11 +1973,20 @@ const fetchOrderDetails = async (orderId: number) => {
                           <td className="px-6 py-4 whitespace-nowrap pl-16">
                             <div className="flex items-center">
                               {variant.image && (
-                                <img
-                                  src={variant.image}
-                                  alt={variant.name}
-                                  className="h-10 w-10 rounded-md object-cover mr-4"
-                                />
+                                isVideoUrl(variant.image) ? (
+                                  <video
+                                    src={buildMediaUrl(variant.image)}
+                                    className="h-10 w-10 rounded-md object-cover mr-4"
+                                    muted
+                                    playsInline
+                                  />
+                                ) : (
+                                  <img
+                                    src={buildMediaUrl(variant.image)}
+                                    alt={variant.name}
+                                    className="h-10 w-10 rounded-md object-cover mr-4"
+                                  />
+                                )
                               )}
                               <div>
                                 <div className="font-medium">{variant.name}</div>
@@ -2326,18 +2471,6 @@ const fetchOrderDetails = async (orderId: number) => {
             <div className="p-6 border-b border-gray-700">
               <div className="flex items-center justify-between">
                 <h3 className="text-xl font-bold text-white flex items-center"><Truck className="h-5 w-5 mr-2"/>Paqueterías</h3>
-                {canManageCouriers && (
-                  <button
-                    onClick={() => {
-                      setNewCourier({ name: '', url: '', logo: '' });
-                      setShowAddCourier(true);
-                    }}
-                    className="inline-flex items-center space-x-2 px-4 py-2 bg-yellow-500 hover:bg-yellow-600 text-black rounded-lg transition-colors"
-                  >
-                    <Plus className="h-4 w-4"/>
-                    <span>Agregar Paquetería</span>
-                  </button>
-                )}
               </div>
             </div>
             <table className="w-full">
@@ -2346,7 +2479,6 @@ const fetchOrderDetails = async (orderId: number) => {
                   <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Nombre</th>
                   <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">URL Tracking</th>
                   <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Logo</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Acciones</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-700">
@@ -2365,34 +2497,10 @@ const fetchOrderDetails = async (orderId: number) => {
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         {c.logo ? (
-                          <img src={c.logo} alt={c.name} className="h-10 w-10 object-contain rounded"/>
+                          <img src={c.logo} alt={c.name} className="h-24 w-24 object-contain rounded"/>
                         ) : (
                           <span className="text-gray-500">-</span>
                         )}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="flex items-center space-x-2">
-                          {canManageCouriers ? (
-                            <>
-                              <button
-                                onClick={() => setEditingCourierData(c)}
-                                className="text-blue-400 hover:text-blue-300"
-                                title="Editar paquetería"
-                              >
-                                <Edit className="h-4 w-4"/>
-                              </button>
-                              <button
-                                onClick={() => handleDeleteCourier(c.id)}
-                                className="text-red-400 hover:text-red-300"
-                                title="Eliminar paquetería"
-                              >
-                                <Trash2 className="h-4 w-4"/>
-                              </button>
-                            </>
-                          ) : (
-                            <span className="text-gray-500 text-sm">Solo lectura</span>
-                          )}
-                        </div>
                       </td>
                     </tr>
                   ));
@@ -2400,6 +2508,72 @@ const fetchOrderDetails = async (orderId: number) => {
               </tbody>
             </table>
             <PaginationControls type="couriers" filteredData={couriers} />
+          </div>
+        )}
+
+        {activeTab === 'packages' && isAdmin() && (
+          <div className="bg-gray-800 rounded-lg overflow-hidden shadow-lg">
+            {loading.packages ? (
+              <div className="flex justify-center items-center p-8">
+                <RefreshCw className="h-6 w-6 animate-spin text-yellow-400" />
+              </div>
+            ) : (
+              <table className="w-full">
+                <thead className="bg-gray-700">
+                  <tr>
+                    <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Nombre</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Peso vacío (g)</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Dimensiones (cm)</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Activo</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-700">
+                  {(() => {
+                    const currentPagination = pagination.packages;
+                    const startIndex = (currentPagination.page - 1) * currentPagination.limit;
+                    const endIndex = startIndex + currentPagination.limit;
+                    const paginatedPackages = filteredPackages.slice(startIndex, endIndex);
+                    return paginatedPackages.map(pkg => (
+                      <tr key={pkg.id}>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="font-medium text-white">{pkg.name}</div>
+                          <div className="text-xs text-gray-400">ID: {pkg.id}</div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">{pkg.empty_weight_grams} g</td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          {pkg.length_cm} x {pkg.width_cm} x {pkg.height_cm}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <span className={`px-2 py-1 rounded-full text-xs font-medium ${pkg.is_active ? 'bg-green-500/20 text-green-400' : 'bg-gray-600 text-gray-300'}`}>
+                            {pkg.is_active ? 'Sí' : 'No'}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="flex items-center space-x-2">
+                            <button
+                              onClick={() => setEditingPackage({ ...pkg })}
+                              className="text-blue-400 hover:text-blue-300"
+                              title="Editar paquete"
+                            >
+                              <Edit className="h-4 w-4" />
+                            </button>
+                            <button
+                              onClick={() => handleDeletePackage(pkg.id)}
+                              className="text-red-400 hover:text-red-300"
+                              title="Eliminar paquete"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ));
+                  })()}
+                </tbody>
+              </table>
+            )}
+            <PaginationControls type="packages" filteredData={filteredPackages} />
           </div>
         )}
 
@@ -2687,10 +2861,28 @@ const fetchOrderDetails = async (orderId: number) => {
                   type="file"
                   accept="image/*"
                   className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
-                  onChange={(e) => setProductMainImageFile(e.target.files && e.target.files[0] ? e.target.files[0] : null)}
+                  onChange={(e) => {
+                    setProductMainImageFile(e.target.files && e.target.files[0] ? e.target.files[0] : null);
+                    setProductMainVideoFile(null);
+                  }}
                 />
                 {productMainImageFile && (
                   <p className="text-xs text-gray-400 mt-1">{productMainImageFile.name}</p>
+                )}
+              </div>
+              <div>
+                <label className="block text-gray-300 mb-1">Video Principal (opcional, reemplaza imagen)</label>
+                <input
+                  type="file"
+                  accept="video/*"
+                  className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
+                  onChange={(e) => {
+                    setProductMainVideoFile(e.target.files && e.target.files[0] ? e.target.files[0] : null);
+                    setProductMainImageFile(null);
+                  }}
+                />
+                {productMainVideoFile && (
+                  <p className="text-xs text-gray-400 mt-1">{productMainVideoFile.name}</p>
                 )}
               </div>
               <div className="md:col-span-2">
@@ -2699,47 +2891,96 @@ const fetchOrderDetails = async (orderId: number) => {
                   type="file"
                   accept="image/*"
                   multiple
-                  className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
+                  className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 mb-2"
                   onChange={(e) => setProductGalleryFiles(e.target.files)}
                 />
+                <label className="block text-gray-300 mb-1">Videos Complementarios</label>
+                <input
+                  type="file"
+                  accept="video/*"
+                  multiple
+                  className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
+                  onChange={(e) => setProductGalleryVideos(e.target.files)}
+                />
               </div>
-              <div className="flex items-center space-x-4">
-                <label className="flex items-center">
-                  <input
-                    type="checkbox"
-                    checked={newProduct.in_stock || false}
-                    onChange={(e) => setNewProduct({ ...newProduct, in_stock: e.target.checked })}
-                    className="mr-2"
-                  />
-                  En Stock
-                </label>
-                <label className="flex items-center">
-                  <input
-                    type="checkbox"
-                    checked={newProduct.is_new || false}
-                    onChange={(e) => setNewProduct({ ...newProduct, is_new: e.target.checked })}
-                    className="mr-2"
-                  />
-                  Nuevo
-                </label>
-                <label className="flex items-center">
-                  <input
-                    type="checkbox"
-                    checked={newProduct.is_featured || false}
-                    onChange={(e) => setNewProduct({ ...newProduct, is_featured: e.target.checked })}
-                    className="mr-2"
-                  />
-                  Destacado
-                </label>
-                <label className="flex items-center">
-                  <input
-                    type="checkbox"
-                    checked={newProduct.has_warranty || false}
-                    onChange={(e) => setNewProduct({ ...newProduct, has_warranty: e.target.checked })}
-                    className="mr-2"
-                  />
-                  Tiene Garantía
-                </label>
+              {/* Estado y flags principales */}
+              <div className="md:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="flex flex-col space-y-2">
+                  <span className="text-gray-300 text-sm font-medium">Estado</span>
+                  <div className="flex flex-wrap gap-4">
+                    <label className="flex items-center">
+                      <input
+                        type="checkbox"
+                        checked={newProduct.in_stock || false}
+                        onChange={(e) => setNewProduct({ ...newProduct, in_stock: e.target.checked })}
+                        className="mr-2"
+                      />
+                      En Stock
+                    </label>
+                    <label className="flex items-center">
+                      <input
+                        type="checkbox"
+                        checked={newProduct.is_new || false}
+                        onChange={(e) => setNewProduct({ ...newProduct, is_new: e.target.checked })}
+                        className="mr-2"
+                      />
+                      Nuevo
+                    </label>
+                    <label className="flex items-center">
+                      <input
+                        type="checkbox"
+                        checked={newProduct.is_featured || false}
+                        onChange={(e) => setNewProduct({ ...newProduct, is_featured: e.target.checked })}
+                        className="mr-2"
+                      />
+                      Destacado
+                    </label>
+                  </div>
+                </div>
+                <div className="flex flex-col space-y-2">
+                  <span className="text-gray-300 text-sm font-medium">Envío y valor</span>
+                  <div className="flex flex-wrap gap-4">
+                    <label className="flex items-center">
+                      <input
+                        type="checkbox"
+                        checked={newProduct.is_high_value || false}
+                        onChange={(e) => setNewProduct({ ...newProduct, is_high_value: e.target.checked })}
+                        className="mr-2"
+                      />
+                      Alto Valor
+                    </label>
+                    <label className="flex items-center">
+                      <input
+                        type="checkbox"
+                        checked={newProduct.requires_special_shipping || false}
+                        onChange={(e) => setNewProduct({ ...newProduct, requires_special_shipping: e.target.checked })}
+                        className="mr-2"
+                      />
+                      Requiere Envío Especial
+                    </label>
+                    <label className="flex items-center">
+                      <input
+                        type="checkbox"
+                        checked={newProduct.has_warranty || false}
+                        onChange={(e) => setNewProduct({ ...newProduct, has_warranty: e.target.checked })}
+                        className="mr-2"
+                      />
+                      Tiene Garantía
+                    </label>
+                  </div>
+                </div>
+              </div>
+              <div>
+                <label className="block text-gray-300 mb-1">Peso (gramos)</label>
+                <input
+                  type="number"
+                  value={newProduct.weight_grams || 100}
+                  onChange={(e) => setNewProduct({ ...newProduct, weight_grams: parseFloat(e.target.value) || 100 })}
+                  className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
+                  placeholder="100"
+                  min="0"
+                  step="0.1"
+                />
               </div>
               {/* Campos de garantía */}
               {newProduct.has_warranty && (
@@ -2801,7 +3042,7 @@ const fetchOrderDetails = async (orderId: number) => {
               </button>
               <button
                 onClick={handleAddProduct}
-                className="px-4 py-2 bg-yellow-600 hover:bg-yellow-700 rounded"
+                className="px-4 py-2 bg-yellow-500 hover:bg-yellow-600 text-black rounded"
               >
                 Agregar Producto
               </button>
@@ -3019,13 +3260,30 @@ const fetchOrderDetails = async (orderId: number) => {
                 <label className="block text-gray-300 mb-1">Imagen Principal</label>
                 <div className="space-y-2">
                   {editingProduct.image && (
-                    <img src={editingProduct.image} alt={editingProduct.name} className="h-24 w-full object-cover rounded-lg" />
+                    isVideoUrl(editingProduct.image) ? (
+                      <video src={buildMediaUrl(editingProduct.image)} className="h-24 w-full object-cover rounded-lg" controls />
+                    ) : (
+                      <img src={buildMediaUrl(editingProduct.image)} alt={editingProduct.name} className="h-24 w-full object-cover rounded-lg" />
+                    )
                   )}
                   <input
                     type="file"
                     accept="image/*"
                     className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
-                    onChange={(e) => setProductMainImageFile(e.target.files && e.target.files[0] ? e.target.files[0] : null)}
+                    onChange={(e) => {
+                      setProductMainImageFile(e.target.files && e.target.files[0] ? e.target.files[0] : null);
+                      setProductMainVideoFile(null);
+                    }}
+                  />
+                  <label className="block text-gray-300 text-sm">Video Principal (opcional, reemplaza imagen)</label>
+                  <input
+                    type="file"
+                    accept="video/*"
+                    className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 mt-2"
+                    onChange={(e) => {
+                      setProductMainVideoFile(e.target.files && e.target.files[0] ? e.target.files[0] : null);
+                      setProductMainImageFile(null);
+                    }}
                   />
                 </div>
               </div>
@@ -3035,7 +3293,11 @@ const fetchOrderDetails = async (orderId: number) => {
                   {editingProduct.images && editingProduct.images.length > 0 ? (
                     editingProduct.images.map(image => (
                       <div key={image.id} className="relative">
-                        <img src={image.url} alt={editingProduct.name} className="h-20 w-20 object-cover rounded-lg border border-gray-700" />
+                        {isVideoUrl(image.url) ? (
+                          <video src={buildMediaUrl(image.url)} className="h-20 w-20 object-cover rounded-lg border border-gray-700" muted playsInline />
+                        ) : (
+                          <img src={buildMediaUrl(image.url)} alt={editingProduct.name} className="h-20 w-20 object-cover rounded-lg border border-gray-700" />
+                        )}
                         <button
                           type="button"
                           onClick={() => handleDeleteProductImage(image.id)}
@@ -3053,47 +3315,96 @@ const fetchOrderDetails = async (orderId: number) => {
                   type="file"
                   accept="image/*"
                   multiple
-                  className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
+                  className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 mb-2"
                   onChange={(e) => setEditingProductGalleryFiles(e.target.files)}
                 />
+                <label className="block text-gray-300 mb-1">Videos Complementarios</label>
+                <input
+                  type="file"
+                  accept="video/*"
+                  multiple
+                  className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
+                  onChange={(e) => setProductGalleryVideos(e.target.files)}
+                />
               </div>
-              <div className="flex items-center space-x-4">
-                <label className="flex items-center">
-                  <input
-                    type="checkbox"
-                    checked={editingProduct.in_stock || false}
-                    onChange={(e) => setEditingProduct({ ...editingProduct, in_stock: e.target.checked })}
-                    className="mr-2"
-                  />
-                  En Stock
-                </label>
-                <label className="flex items-center">
-                  <input
-                    type="checkbox"
-                    checked={editingProduct.is_new || false}
-                    onChange={(e) => setEditingProduct({ ...editingProduct, is_new: e.target.checked })}
-                    className="mr-2"
-                  />
-                  Nuevo
-                </label>
-                <label className="flex items-center">
-                  <input
-                    type="checkbox"
-                    checked={editingProduct.is_featured || false}
-                    onChange={(e) => setEditingProduct({ ...editingProduct, is_featured: e.target.checked })}
-                    className="mr-2"
-                  />
-                  Destacado
-                </label>
-                <label className="flex items-center">
-                  <input
-                    type="checkbox"
-                    checked={editingProduct.has_warranty || false}
-                    onChange={(e) => setEditingProduct({ ...editingProduct, has_warranty: e.target.checked })}
-                    className="mr-2"
-                  />
-                  Tiene Garantía
-                </label>
+              {/* Estado y flags principales (edición) */}
+              <div className="md:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="flex flex-col space-y-2">
+                  <span className="text-gray-300 text-sm font-medium">Estado</span>
+                  <div className="flex flex-wrap gap-4">
+                    <label className="flex items-center">
+                      <input
+                        type="checkbox"
+                        checked={editingProduct.in_stock || false}
+                        onChange={(e) => setEditingProduct({ ...editingProduct, in_stock: e.target.checked })}
+                        className="mr-2"
+                      />
+                      En Stock
+                    </label>
+                    <label className="flex items-center">
+                      <input
+                        type="checkbox"
+                        checked={editingProduct.is_new || false}
+                        onChange={(e) => setEditingProduct({ ...editingProduct, is_new: e.target.checked })}
+                        className="mr-2"
+                      />
+                      Nuevo
+                    </label>
+                    <label className="flex items-center">
+                      <input
+                        type="checkbox"
+                        checked={editingProduct.is_featured || false}
+                        onChange={(e) => setEditingProduct({ ...editingProduct, is_featured: e.target.checked })}
+                        className="mr-2"
+                      />
+                      Destacado
+                    </label>
+                  </div>
+                </div>
+                <div className="flex flex-col space-y-2">
+                  <span className="text-gray-300 text-sm font-medium">Envío y valor</span>
+                  <div className="flex flex-wrap gap-4">
+                    <label className="flex items-center">
+                      <input
+                        type="checkbox"
+                        checked={editingProduct.is_high_value || false}
+                        onChange={(e) => setEditingProduct({ ...editingProduct, is_high_value: e.target.checked })}
+                        className="mr-2"
+                      />
+                      Alto Valor
+                    </label>
+                    <label className="flex items-center">
+                      <input
+                        type="checkbox"
+                        checked={editingProduct.requires_special_shipping || false}
+                        onChange={(e) => setEditingProduct({ ...editingProduct, requires_special_shipping: e.target.checked })}
+                        className="mr-2"
+                      />
+                      Requiere Envío Especial
+                    </label>
+                    <label className="flex items-center">
+                      <input
+                        type="checkbox"
+                        checked={editingProduct.has_warranty || false}
+                        onChange={(e) => setEditingProduct({ ...editingProduct, has_warranty: e.target.checked })}
+                        className="mr-2"
+                      />
+                      Tiene Garantía
+                    </label>
+                  </div>
+                </div>
+              </div>
+              <div>
+                <label className="block text-gray-300 mb-1">Peso (gramos)</label>
+                <input
+                  type="number"
+                  value={editingProduct.weight_grams || 100}
+                  onChange={(e) => setEditingProduct({ ...editingProduct, weight_grams: parseFloat(e.target.value) || 100 })}
+                  className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
+                  placeholder="100"
+                  min="0"
+                  step="0.1"
+                />
               </div>
               {/* Campos de garantía para edición */}
               {editingProduct.has_warranty && (
@@ -3158,7 +3469,7 @@ const fetchOrderDetails = async (orderId: number) => {
               </button>
               <button
                 onClick={() => handleEditProduct(editingProduct)}
-                className="px-4 py-2 bg-yellow-600 hover:bg-yellow-700 rounded"
+                className="px-4 py-2 bg-yellow-500 hover:bg-yellow-600 text-black rounded"
               >
                 Guardar Cambios
               </button>
@@ -3205,9 +3516,174 @@ const fetchOrderDetails = async (orderId: number) => {
               </button>
               <button
                 onClick={handleAddUser}
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded"
+                className="px-4 py-2 bg-yellow-500 hover:bg-yellow-600 text-black rounded"
               >
                 Agregar Usuario
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal para agregar paquete */}
+      {showAddPackage && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-gray-800 rounded-lg p-6 w-full max-w-md">
+            <h3 className="text-lg font-bold mb-4">Agregar Paquete</h3>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-gray-300 mb-1">Nombre</label>
+                <input
+                  type="text"
+                  value={newPackage.name || ''}
+                  onChange={(e) => setNewPackage({ ...newPackage, name: e.target.value })}
+                  className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-gray-300 mb-1">Peso vacío (g)</label>
+                  <input
+                    type="number"
+                    value={newPackage.empty_weight_grams ?? 0}
+                    onChange={(e) => setNewPackage({ ...newPackage, empty_weight_grams: parseFloat(e.target.value) || 0 })}
+                    className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
+                  />
+                </div>
+                <div>
+                  <label className="block text-gray-300 mb-1">Largo (cm)</label>
+                  <input
+                    type="number"
+                    value={newPackage.length_cm ?? 0}
+                    onChange={(e) => setNewPackage({ ...newPackage, length_cm: parseFloat(e.target.value) || 0 })}
+                    className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
+                  />
+                </div>
+                <div>
+                  <label className="block text-gray-300 mb-1">Ancho (cm)</label>
+                  <input
+                    type="number"
+                    value={newPackage.width_cm ?? 0}
+                    onChange={(e) => setNewPackage({ ...newPackage, width_cm: parseFloat(e.target.value) || 0 })}
+                    className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
+                  />
+                </div>
+                <div>
+                  <label className="block text-gray-300 mb-1">Alto (cm)</label>
+                  <input
+                    type="number"
+                    value={newPackage.height_cm ?? 0}
+                    onChange={(e) => setNewPackage({ ...newPackage, height_cm: parseFloat(e.target.value) || 0 })}
+                    className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
+                  />
+                </div>
+              </div>
+              <label className="flex items-center space-x-2 text-sm text-gray-300">
+                <input
+                  type="checkbox"
+                  checked={newPackage.is_active ?? true}
+                  onChange={(e) => setNewPackage({ ...newPackage, is_active: e.target.checked })}
+                  className="rounded"
+                />
+                <span>Activo</span>
+              </label>
+            </div>
+            <div className="flex justify-end space-x-2 mt-6">
+              <button
+                onClick={() => setShowAddPackage(false)}
+                className="px-4 py-2 bg-gray-600 hover:bg-gray-700 rounded"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={() => {
+                  handleAddPackage();
+                  setShowAddPackage(false);
+                }}
+                className="px-4 py-2 bg-yellow-500 hover:bg-yellow-600 text-black rounded"
+              >
+                Guardar paquete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal para editar paquete */}
+      {editingPackage && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-gray-800 rounded-lg p-6 w-full max-w-md">
+            <h3 className="text-lg font-bold mb-4">Editar Paquete</h3>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-gray-300 mb-1">Nombre</label>
+                <input
+                  type="text"
+                  value={editingPackage.name}
+                  onChange={(e) => setEditingPackage({ ...editingPackage, name: e.target.value })}
+                  className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-gray-300 mb-1">Peso vacío (g)</label>
+                  <input
+                    type="number"
+                    value={editingPackage.empty_weight_grams}
+                    onChange={(e) => setEditingPackage({ ...editingPackage, empty_weight_grams: parseFloat(e.target.value) || 0 })}
+                    className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
+                  />
+                </div>
+                <div>
+                  <label className="block text-gray-300 mb-1">Largo (cm)</label>
+                  <input
+                    type="number"
+                    value={editingPackage.length_cm}
+                    onChange={(e) => setEditingPackage({ ...editingPackage, length_cm: parseFloat(e.target.value) || 0 })}
+                    className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
+                  />
+                </div>
+                <div>
+                  <label className="block text-gray-300 mb-1">Ancho (cm)</label>
+                  <input
+                    type="number"
+                    value={editingPackage.width_cm}
+                    onChange={(e) => setEditingPackage({ ...editingPackage, width_cm: parseFloat(e.target.value) || 0 })}
+                    className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
+                  />
+                </div>
+                <div>
+                  <label className="block text-gray-300 mb-1">Alto (cm)</label>
+                  <input
+                    type="number"
+                    value={editingPackage.height_cm}
+                    onChange={(e) => setEditingPackage({ ...editingPackage, height_cm: parseFloat(e.target.value) || 0 })}
+                    className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
+                  />
+                </div>
+              </div>
+              <label className="flex items-center space-x-2 text-sm text-gray-300">
+                <input
+                  type="checkbox"
+                  checked={editingPackage.is_active}
+                  onChange={(e) => setEditingPackage({ ...editingPackage, is_active: e.target.checked })}
+                  className="rounded"
+                />
+                <span>Activo</span>
+              </label>
+            </div>
+            <div className="flex justify-end space-x-2 mt-6">
+              <button
+                onClick={() => setEditingPackage(null)}
+                className="px-4 py-2 bg-gray-600 hover:bg-gray-700 rounded"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleUpdatePackage}
+                className="px-4 py-2 bg-yellow-500 hover:bg-yellow-600 text-black rounded"
+              >
+                Guardar cambios
               </button>
             </div>
           </div>
@@ -3313,7 +3789,7 @@ const fetchOrderDetails = async (orderId: number) => {
               </button>
               <button
                 onClick={handleAddVariant}
-                className="px-4 py-2 bg-yellow-600 hover:bg-yellow-700 rounded"
+                className="px-4 py-2 bg-yellow-500 hover:bg-yellow-600 text-black rounded"
               >
                 Agregar Variante
               </button>
@@ -3392,7 +3868,11 @@ const fetchOrderDetails = async (orderId: number) => {
                 <label className="block text-gray-300 mb-1">Imagen Principal</label>
                 <div className="space-y-2">
                   {editingVariant.image && (
-                    <img src={editingVariant.image} alt={editingVariant.name} className="h-24 w-full object-cover rounded-lg" />
+                    isVideoUrl(editingVariant.image) ? (
+                      <video src={buildMediaUrl(editingVariant.image)} className="h-24 w-full object-cover rounded-lg" controls />
+                    ) : (
+                      <img src={buildMediaUrl(editingVariant.image)} alt={editingVariant.name} className="h-24 w-full object-cover rounded-lg" />
+                    )
                   )}
                   <input
                     type="file"
@@ -3408,7 +3888,11 @@ const fetchOrderDetails = async (orderId: number) => {
                   {editingVariant?.variant_images && editingVariant.variant_images.length > 0 ? (
                     editingVariant.variant_images.map(image => (
                       <div key={image.id} className="relative">
-                        <img src={image.url} alt={editingVariant.name} className="h-20 w-20 object-cover rounded-lg border border-gray-700" />
+                        {isVideoUrl(image.url) ? (
+                          <video src={buildMediaUrl(image.url)} className="h-20 w-20 object-cover rounded-lg border border-gray-700" muted playsInline />
+                        ) : (
+                          <img src={buildMediaUrl(image.url)} alt={editingVariant.name} className="h-20 w-20 object-cover rounded-lg border border-gray-700" />
+                        )}
                         <button
                           type="button"
                           onClick={() => handleDeleteVariantImage(image.id)}
@@ -3444,7 +3928,7 @@ const fetchOrderDetails = async (orderId: number) => {
               </button>
               <button
                 onClick={handleEditVariant}
-                className="px-4 py-2 bg-yellow-600 hover:bg-yellow-700 rounded"
+                className="px-4 py-2 bg-yellow-500 hover:bg-yellow-600 text-black rounded"
               >
                 Guardar Cambios
               </button>
@@ -3535,7 +4019,13 @@ const fetchOrderDetails = async (orderId: number) => {
                 {orderDetailItems.map((it) => (
                   <div key={it.id} className="flex items-center justify-between">
                     <div className="flex items-center space-x-3">
-                      <img src={it.product?.image} alt={it.product?.name} className="h-10 w-10 rounded object-cover" />
+                      {it.product?.image && (
+                        isVideoUrl(it.product.image) ? (
+                          <video src={buildMediaUrl(it.product.image)} className="h-10 w-10 rounded object-cover" muted playsInline />
+                        ) : (
+                          <img src={buildMediaUrl(it.product.image)} alt={it.product?.name} className="h-10 w-10 rounded object-cover" />
+                        )
+                      )}
                       <div>
                         <a
                           href={`/producto/${it.product_id}`}
@@ -3601,6 +4091,24 @@ const fetchOrderDetails = async (orderId: number) => {
                 ))}
               </select>
               <p className="text-xs text-gray-400">Si no seleccionas, se usará el courier por defecto configurado en la API.</p>
+              <label className="block text-gray-300 text-sm">Paquete de envío</label>
+              <select
+                value={selectedPackageIdForLabels === '' ? '' : String(selectedPackageIdForLabels)}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setSelectedPackageIdForLabels(val === '' ? '' : Number(val));
+                }}
+                className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white"
+                disabled={processingShipping}
+              >
+                <option value="">Selecciona un paquete</option>
+                {packages.filter(p => p.is_active).map(p => (
+                  <option key={p.id} value={p.id}>
+                    {p.name} · {p.length_cm}x{p.width_cm}x{p.height_cm} cm · {p.empty_weight_grams} g
+                  </option>
+                ))}
+              </select>
+              <p className="text-xs text-gray-400">Obligatorio para crear la etiqueta.</p>
             </div>
             {shippingStatusMessage && (
               <div className="mt-3 text-sm text-yellow-300 bg-yellow-500/10 border border-yellow-500/20 rounded px-3 py-2">
@@ -3620,7 +4128,7 @@ const fetchOrderDetails = async (orderId: number) => {
               <button
                 onClick={handleCreateAndProcessShipping}
                 disabled={processingShipping}
-                className="px-4 py-2 bg-green-600 hover:bg-green-700 rounded disabled:opacity-50 disabled:cursor-not-allowed"
+                className="px-4 py-2 bg-yellow-500 hover:bg-yellow-600 text-black rounded disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {processingShipping ? 'Procesando...' : 'Crear y procesar etiquetas'}
               </button>
@@ -3683,7 +4191,7 @@ const fetchOrderDetails = async (orderId: number) => {
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
               <button
                 onClick={downloadPdfCombined}
-                className="w-full sm:w-auto px-4 py-2 bg-yellow-600 hover:bg-yellow-700 rounded text-black font-medium"
+                className="w-full sm:w-auto px-4 py-2 bg-yellow-500 hover:bg-yellow-600 rounded text-black font-medium"
               >
                 Descargar PDF combinado
               </button>
@@ -3702,125 +4210,6 @@ const fetchOrderDetails = async (orderId: number) => {
         </div>
       )}
 
-      {/* Modal para agregar paquetería */}
-      {showAddCourier && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-gray-800 rounded-lg p-6 w-full max-w-md">
-            <h3 className="text-lg font-bold mb-4">Agregar Paquetería</h3>
-            <div className="space-y-4">
-              <div>
-                <label className="block text-gray-300 mb-1">Nombre *</label>
-                <input
-                  type="text"
-                  value={newCourier.name}
-                  onChange={(e) => setNewCourier({ ...newCourier, name: e.target.value })}
-                  className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
-                  placeholder="Ej: FedEx, DHL, etc."
-                />
-              </div>
-              <div>
-                <label className="block text-gray-300 mb-1">URL Base de Rastreo</label>
-                <input
-                  type="text"
-                  value={newCourier.url}
-                  onChange={(e) => setNewCourier({ ...newCourier, url: e.target.value })}
-                  className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
-                  placeholder="Ej: https://www.fedex.com/tracking?tracknumbers="
-                />
-                <p className="text-xs text-gray-400 mt-1">El código de rastreo se agregará al final de esta URL</p>
-              </div>
-              <div>
-                <label className="block text-gray-300 mb-1">URL del Logo</label>
-                <input
-                  type="text"
-                  value={newCourier.logo}
-                  onChange={(e) => setNewCourier({ ...newCourier, logo: e.target.value })}
-                  className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
-                  placeholder="https://ejemplo.com/logo.png"
-                />
-              </div>
-            </div>
-            <div className="flex justify-end space-x-2 mt-6">
-              <button
-                onClick={() => {
-                  setShowAddCourier(false);
-                  setNewCourier({ name: '', url: '', logo: '' });
-                }}
-                className="px-4 py-2 bg-gray-600 hover:bg-gray-700 rounded"
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={handleAddCourier}
-                className="px-4 py-2 bg-yellow-600 hover:bg-yellow-700 rounded"
-              >
-                Agregar Paquetería
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Modal para editar paquetería */}
-      {editingCourierData && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-gray-800 rounded-lg p-6 w-full max-w-md">
-            <h3 className="text-lg font-bold mb-4">Editar Paquetería</h3>
-            <div className="space-y-4">
-              <div>
-                <label className="block text-gray-300 mb-1">Nombre *</label>
-                <input
-                  type="text"
-                  value={editingCourierData.name}
-                  onChange={(e) => setEditingCourierData({ ...editingCourierData, name: e.target.value })}
-                  className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
-                  placeholder="Ej: FedEx, DHL, etc."
-                />
-              </div>
-              <div>
-                <label className="block text-gray-300 mb-1">URL Base de Rastreo</label>
-                <input
-                  type="text"
-                  value={editingCourierData.url || ''}
-                  onChange={(e) => setEditingCourierData({ ...editingCourierData, url: e.target.value })}
-                  className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
-                  placeholder="Ej: https://www.fedex.com/tracking?tracknumbers="
-                />
-                <p className="text-xs text-gray-400 mt-1">El código de rastreo se agregará al final de esta URL</p>
-              </div>
-              <div>
-                <label className="block text-gray-300 mb-1">URL del Logo</label>
-                <input
-                  type="text"
-                  value={editingCourierData.logo || ''}
-                  onChange={(e) => setEditingCourierData({ ...editingCourierData, logo: e.target.value })}
-                  className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
-                  placeholder="https://ejemplo.com/logo.png"
-                />
-                {editingCourierData.logo && (
-                  <div className="mt-2">
-                    <img src={editingCourierData.logo} alt="Logo preview" className="h-16 object-contain" />
-                  </div>
-                )}
-              </div>
-            </div>
-            <div className="flex justify-end space-x-2 mt-6">
-              <button
-                onClick={() => setEditingCourierData(null)}
-                className="px-4 py-2 bg-gray-600 hover:bg-gray-700 rounded"
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={handleEditCourier}
-                className="px-4 py-2 bg-yellow-600 hover:bg-yellow-700 rounded"
-              >
-                Guardar Cambios
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

@@ -14,7 +14,7 @@ const Hero: React.FC<HeroProps> = ({ onShopNow }) => {
     }
   };
   return (
-    <section className="relative h-[90vh] bg-gradient-to-br from-black via-gray-900 to-black overflow-hidden">
+    <section className="relative h-[90vh] bg-gradient-to-br from-black  to-black overflow-hidden">
       {/* Background image */}
       <div className="absolute inset-0">
         <img 
@@ -22,7 +22,7 @@ const Hero: React.FC<HeroProps> = ({ onShopNow }) => {
           alt="Luxury jewelry"
           className="w-full h-full object-cover opacity-40"
         />
-        <div className="absolute inset-0 bg-gradient-to-r from-black/70 via-black/50 to-transparent"></div>
+        <div className="absolute inset-0 bg-gradient-to-r from-black/10 via-black/30 to-transparent"></div>
       </div>
 
       {/* Floating elements */}

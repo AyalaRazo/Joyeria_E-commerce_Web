@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ChevronDown, ChevronUp, MapPin, Package, Eye, EyeOff } from 'lucide-react';
+import { ChevronDown, ChevronUp, MapPin, Package } from 'lucide-react';
 import type { Order } from '../types';
 
 interface OrderCardProps {
@@ -100,7 +100,7 @@ const OrderCard: React.FC<OrderCardProps> = ({ order }) => {
       </div>
 
       {/* Shipping Address */}
-      {order.addresses && order.addresses.length > 0 && (
+      {(order.shipping_address || (order.addresses && order.addresses.length > 0)) && (
         <div>
           <button
             onClick={() => setShowAddress(!showAddress)}
@@ -121,11 +121,17 @@ const OrderCard: React.FC<OrderCardProps> = ({ order }) => {
 
           {showAddress && (
             <div className="mt-4 p-4 bg-gray-800/30 rounded-lg border border-gray-700">
-              {order.addresses.map((address, index) => (
+              {/* Usar shipping_address si está disponible, sino usar addresses para compatibilidad */}
+              {(order.shipping_address ? [order.shipping_address] : (order.addresses || [])).map((address, index) => (
                 <div key={address.id || index} className="space-y-2">
                   {address.name && (
                     <div className="text-sm font-medium text-gray-200">
                       {address.name}
+                    </div>
+                  )}
+                  {address.label && (
+                    <div className="text-xs text-gray-400">
+                      {address.label}
                     </div>
                   )}
                   <div className="text-sm text-gray-300">

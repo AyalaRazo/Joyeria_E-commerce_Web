@@ -98,9 +98,12 @@ export interface Order {
   order_items?: OrderItem[];
   // Nueva relación de envío
   shipping_address_id?: number | null;
+  shipping_address?: UserAddress | null;
   shipping_snapshot?: any | null;
   user?: User;
   courier?: Courier;
+  // Mantener compatibilidad temporal con código antiguo
+  addresses?: UserAddress[];
 }
 
 export type OrderStatus = 

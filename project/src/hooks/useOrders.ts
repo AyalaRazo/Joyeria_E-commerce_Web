@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
-import type { Order, OrderItem, Address } from '../types';
+import type { Order, OrderItem, UserAddress } from '../types';
 
 export const useOrders = () => {
   const [orders, setOrders] = useState<Order[]>([]);
@@ -26,7 +26,7 @@ export const useOrders = () => {
             product:products(*),
             variant:product_variants(*)
           ),
-          addresses(*)
+          shipping_address:user_addresses(*)
         `)
         .eq('user_id', user.id)
         .neq('status', 'reserved')
@@ -51,7 +51,7 @@ export const useOrders = () => {
       quantity: number;
       price: number;
     }>;
-    addresses: Address[];
+    shipping_address_id?: number | null;
   }) => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -65,7 +65,8 @@ export const useOrders = () => {
         .insert({
           user_id: user.id,
           total: orderData.total,
-          status: 'reserved'
+          status: 'reserved',
+          shipping_address_id: orderData.shipping_address_id || null
         })
         .select()
         .single();
@@ -86,19 +87,6 @@ export const useOrders = () => {
         .insert(orderItems);
 
       if (itemsError) throw itemsError;
-
-      // Crear las direcciones
-      const addresses = orderData.addresses.map(address => ({
-        ...address,
-        order_id: order.id,
-        user_id: user.id
-      }));
-
-      const { error: addressesError } = await supabase
-        .from('addresses')
-        .insert(addresses);
-
-      if (addressesError) throw addressesError;
 
       // Recargar órdenes
       await loadOrders();
@@ -123,7 +111,7 @@ export const useOrders = () => {
             product:products(*),
             variant:product_variants(*)
           ),
-          addresses(*)
+          shipping_address:user_addresses(*)
         `)
         .eq('id', orderId)
         .single();

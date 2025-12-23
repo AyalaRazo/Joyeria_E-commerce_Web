@@ -47,7 +47,7 @@ export const checkAllTables = async () => {
     'carts',
     'reviews',
     'user_roles',
-    'addresses',
+    'user_addresses',
     'interested_clients',
     'emails',
     'cart_reminders',

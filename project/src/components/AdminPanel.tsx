@@ -898,11 +898,7 @@ const fetchOrderDetails = async (orderId: number) => {
 
       const result = await response.json();
 
-      // Actualizar la orden en la base de datos local
-      await supabase.from('orders').update({
-        status: returnType === 'refund' ? 'reembolsado' : (returnType === 'full' ? 'devuelto' : 'parcialmente_devuelto'),
-        return_status: returnType === 'refund' ? 'refund' : (returnType === 'full' ? 'full' : 'partial')
-      }).eq('id', showReturnModal.orderId);
+
 
       if (result?.return_id) {
         await supabase.from('returns').update({
@@ -2348,7 +2344,7 @@ const fetchOrderDetails = async (orderId: number) => {
               <thead className="bg-gray-700">
                 <tr>
                   <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Nombre</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">URL Base</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">URL Tracking</th>
                   <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Logo</th>
                   <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Acciones</th>
                 </tr>

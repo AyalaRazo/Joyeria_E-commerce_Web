@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { X, Search, SlidersHorizontal, Plus, Star, Tag, ShoppingBag } from 'lucide-react';
+import { X, Search, SlidersHorizontal, Plus, Star, Tag, Box, Gem } from 'lucide-react';
+// Agrega 'Gem' o 'Diamond' para representar materiales
 import { Product } from '../types/index';
 import { useNavigate } from 'react-router-dom';
 import { useProducts } from '../hooks/useProducts';
-import { useCart } from '../hooks/useCart';
+import { buildMediaUrl } from '../utils/storage';
 
 interface SearchModalProps {
   isOpen: boolean;
@@ -15,7 +16,6 @@ const SearchModal: React.FC<SearchModalProps> = ({
   onClose,
 }) => {
   const { products, categories, loading } = useProducts();
-  const { addToCart } = useCart();
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [priceRange, setPriceRange] = useState({ min: 0, max: 10000 });
@@ -25,7 +25,6 @@ const SearchModal: React.FC<SearchModalProps> = ({
 
   const navigate = useNavigate();
 
-  // Función para obtener detalles del producto
   const getProductDetails = (product: Product) => {
     let currentPrice = product.price;
     let originalPrice = product.original_price ?? null;
@@ -33,8 +32,11 @@ const SearchModal: React.FC<SearchModalProps> = ({
     let stock = product.stock ?? 0;
     let hasDiscount = false;
     let discountPercentage = 0;
-
-    // Manejo de variantes
+    let selectedModel = '';
+  
+    // Obtener material del producto
+    const material = product.material || '';
+  
     if (product.variants && product.variants.length > 0) {
       const defaultModel = getDefaultModel(product);
       const defaultSize = getDefaultSize(product, defaultModel);
@@ -42,25 +44,24 @@ const SearchModal: React.FC<SearchModalProps> = ({
                              product.variants.find(v => v.model === defaultModel) || 
                              product.variants.find(v => v.size === defaultSize) || 
                              product.variants[0];
-
+  
       if (selectedVariant) {
         currentPrice = selectedVariant.price;
         originalPrice = selectedVariant.original_price ?? product.original_price ?? null;
         image = selectedVariant.image || product.image;
         stock = selectedVariant.stock ?? 0;
+        selectedModel = selectedVariant.model || defaultModel || '';
       }
     }
-
-    // Calcular descuentos
+  
     if (originalPrice && originalPrice > currentPrice) {
       hasDiscount = true;
       discountPercentage = Math.round(((originalPrice - currentPrice) / originalPrice) * 100);
     }
-
-    // Obtener nombre de categoría para mostrar
+  
     const category = categories.find(c => c.id === product.category_id);
     const categoryName = category ? category.name : '';
-
+  
     return {
       inStock: stock > 0,
       stock,
@@ -71,7 +72,9 @@ const SearchModal: React.FC<SearchModalProps> = ({
       image,
       isFeatured: product.is_featured ?? false,
       isNew: product.is_new ?? false,
-      categoryName
+      categoryName,
+      model: selectedModel,
+      material: material // Agregado material aquí
     };
   };
 
@@ -88,9 +91,16 @@ const SearchModal: React.FC<SearchModalProps> = ({
 
   const filteredAndSortedProducts = useMemo(() => {
     const term = searchTerm.toLowerCase().trim();
-    let filtered = products;
+    // Filtrar productos activos y variantes activas
+    let filtered = products.filter(product => {
+      if (product.is_active === false) return false;
+      // Si tiene variantes, al menos una debe estar activa
+      if (product.variants && product.variants.length > 0) {
+        return product.variants.some(v => v.is_active !== false);
+      }
+      return true;
+    });
     
-    // Filtrado por término de búsqueda
     if (term) {
       filtered = filtered.filter(product => {
         const category = categories.find(c => c.id === product.category_id);
@@ -111,18 +121,15 @@ const SearchModal: React.FC<SearchModalProps> = ({
       filtered = [];
     }
   
-    // Filtrado por rango de precio
     filtered = filtered.filter(product => {
       const { price } = getProductDetails(product);
       return price >= priceRange.min && price <= priceRange.max;
     });
   
-    // Filtrado por destacados
     if (sortBy === 'featured') {
       filtered = filtered.filter(product => product.is_featured);
     }
 
-    // Filtrado por productos con descuento
     if (showOnlyDiscounted) {
       filtered = filtered.filter(product => {
         const { hasDiscount } = getProductDetails(product);
@@ -130,7 +137,6 @@ const SearchModal: React.FC<SearchModalProps> = ({
       });
     }
   
-    // Ordenamiento
     filtered = [...filtered].sort((a, b) => {
       const detailsA = getProductDetails(a);
       const detailsB = getProductDetails(b);
@@ -161,7 +167,6 @@ const SearchModal: React.FC<SearchModalProps> = ({
     }).format(price);
   };
 
-  // Reset search when modal closes
   useEffect(() => {
     if (!isOpen) {
       setSearchTerm('');
@@ -175,11 +180,9 @@ const SearchModal: React.FC<SearchModalProps> = ({
 
   if (!isOpen) return null;
 
-  // Componente de tarjeta de producto simplificada
   const SimplifiedProductCard = ({ product }: { product: Product }) => {
     const {
       inStock,
-      stock,
       price,
       originalPrice,
       hasDiscount,
@@ -187,75 +190,96 @@ const SearchModal: React.FC<SearchModalProps> = ({
       image,
       isFeatured,
       isNew,
-      categoryName
+      categoryName,
+      model,
+      material
     } = getProductDetails(product);
-
-    const [showStockCount, setShowStockCount] = useState(false);
 
     return (
       <div 
-        className="group relative bg-gradient-to-br from-gray-800 to-gray-900 rounded-xl overflow-hidden shadow-lg hover:shadow-gray-400/10 transition-all duration-300 cursor-pointer h-full"
+        className="group relative bg-gradient-to-br from-gray-800 to-gray-900 rounded-lg overflow-hidden shadow hover:shadow-gray-400/5 transition-all duration-200 cursor-pointer h-full border border-gray-700 flex flex-col"
         onClick={() => navigate(`/producto/${product.id}`)}
       >
-        {/* Imagen */}
-        <div className="relative h-40 overflow-hidden">
+        <div className="relative aspect-square overflow-hidden bg-gray-900">
           <img
-            src={image}
+            src={buildMediaUrl(image)}
             alt={product.name}
-            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+            className="w-full h-full object-contain p-2 group-hover:scale-105 transition-transform duration-300"
           />
           
-          {/* Badges */}
-          <div className="absolute top-2 left-2 z-10 flex flex-col space-y-1">
+          {/* Badges con iconos en esquina inferior izquierda */}
+          <div className="absolute bottom-2 left-2 flex flex-wrap gap-1 justify-start">
             {isNew && (
-              <span className="bg-gradient-to-r from-green-500 to-green-600 text-white px-2 py-0.5 rounded-full text-xs font-bold flex items-center justify-center">
-                <Plus className="h-3.5 w-3.5" fill="currentColor" />
+              <span className="bg-green-600 text-white px-1.5 py-0.5 rounded-full text-[10px] font-bold flex items-center justify-center">
+                <Plus className="h-3 w-3" fill="currentColor" />
               </span>
             )}
             {isFeatured && (
-              <span className="bg-gradient-to-r from-gray-300 to-gray-500 text-black px-2 py-0.5 rounded-full text-xs font-bold flex items-center justify-center">
-                <Star className="h-3 w-3" fill="currentColor" />
+              <span className="bg-gray-300 text-black px-1.5 py-0.5 rounded-full text-[10px] font-bold flex items-center justify-center">
+                <Star className="h-2.5 w-2.5" fill="currentColor" />
               </span>
             )}
             {hasDiscount && (
-              <span className="bg-gradient-to-r from-red-500 to-red-600 text-white px-2 py-0.5 rounded-full text-xs font-bold flex items-center justify-center">
+              <span className="bg-red-600 text-white px-1.5 py-0.5 rounded-full text-[10px] font-bold flex items-center justify-center">
                 -{discountPercentage}%
               </span>
             )}
           </div>
         </div>
 
-        {/* Información del producto */}
-        <div className="p-3">
-          <h3 className="text-sm font-bold text-white mb-1 line-clamp-1">
-            {product.name}
-          </h3>
-          <p className="text-xs text-gray-400 mb-2 line-clamp-2">
-            {categoryName} • {product.material || 'Material no especificado'}
-          </p>
+        <div className="p-3 flex-1 flex flex-col">
+          <div className="flex-1">
+            <h3 className="text-xs font-bold text-white mb-1.5 line-clamp-2 min-h-[2.5rem]">
+              {product.name}
+            </h3>
+            
+            {/* Mostrar materiales si existen */}
+            {material && (
+              <div className="flex items-center gap-1 mb-1.5">
+                <Gem className="h-2.5 w-2.5 text-yellow-400" /> {/* Cambiado a amarillo */}
+                <span className="text-[10px] text-yellow-400 truncate"> {/* Cambiado a amarillo */}
+                  {material}
+                </span>
+              </div>
+            )}
+            
+            {/* Mostrar modelo si existe - color blanco */}
+            {model && (
+              <div className="flex items-center gap-1 mb-1.5">
+                <Box className="h-2.5 w-2.5 text-gray-400" />
+                <span className="text-[10px] text-white font-medium truncate">
+                  Modelo: {model}
+                </span>
+              </div>
+            )}
+            
+            <p className="text-[10px] text-gray-400 mb-2 line-clamp-1">
+              {categoryName}
+            </p>
+          </div>
           
-          <div className="flex flex-col space-y-1">
+          <div className="space-y-1.5 pt-2 border-t border-gray-700">
             <div className="flex items-center justify-between">
               <span className="text-sm font-bold text-gray-300">
                 {formatPrice(price)}
               </span>
               {hasDiscount && originalPrice && (
-                <span className="text-xs line-through text-gray-500">
+                <span className="text-[10px] line-through text-gray-500">
                   {formatPrice(originalPrice)}
                 </span>
               )}
             </div>
             
-            <div className="flex items-center gap-1 justify-between">
+            <div className="flex items-center justify-between">
               <div className="flex items-center gap-1">
                 <div className={`w-2 h-2 rounded-full ${inStock ? 'bg-green-500' : 'bg-red-500'}`}></div>
-                <span className={`text-xs ${inStock ? 'text-green-400' : 'text-red-400'}`}>
-                  {inStock ? (showStockCount ? `${stock}` : 'Disponible') : 'Agotado'}
+                <span className={`text-[10px] ${inStock ? 'text-green-400' : 'text-red-400'}`}>
+                  {inStock ? 'Disponible' : 'Agotado'}
                 </span>
               </div>
               {hasDiscount && originalPrice && (
-                <span className="text-xs font-bold text-green-400">
-                  Ahorras {formatPrice(originalPrice - price)}
+                <span className="text-[10px] font-bold text-green-400">
+                  Ahorra {formatPrice(originalPrice - price)}
                 </span>
               )}
             </div>
@@ -267,60 +291,56 @@ const SearchModal: React.FC<SearchModalProps> = ({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center px-2 sm:px-6 pt-20 pb-6"
-      style={{ background: 'rgba(0,0,0,0.8)' }}
+      className="fixed inset-0 z-50 flex items-start justify-center px-2 pt-16 pb-4"
+      style={{ background: 'rgba(0,0,0,0.9)' }}
       onClick={onClose}
     >
       <div
-        className="relative w-full max-w-6xl bg-gradient-to-b from-gray-900 to-black rounded-2xl shadow-2xl max-h-[85vh] overflow-hidden"
+        className="relative w-full max-w-5xl bg-gradient-to-b from-gray-900 to-black rounded-lg shadow-lg max-h-[80vh] overflow-hidden"
         onClick={e => e.stopPropagation()}
       >
-        {/* Botón de cierre */}
         <button
           onClick={onClose}
-          className="absolute top-4 right-4 z-50 bg-gradient-to-r from-gray-300 via-gray-400 to-gray-500 text-black rounded-full p-3 shadow-lg hover:scale-110 transition-all duration-200"
+          className="absolute top-3 right-3 z-50 bg-gray-800 text-white rounded-full p-2 hover:bg-gray-700 transition-colors duration-150"
           aria-label="Cerrar búsqueda"
         >
-          <X className="h-4 w-4" />
+          <X className="h-3.5 w-3.5" />
         </button>
 
-        {/* Header */}
-        <div className="flex items-center space-x-3 p-4 border-b border-gray-700">
-          <Search className="h-5 w-5 text-gray-300" />
-          <h2 className="text-lg font-bold text-white">Buscar Productos</h2>
+        <div className="flex items-center space-x-2 p-3 border-b border-gray-800">
+          <Search className="h-4 w-4 text-gray-300" />
+          <h2 className="text-base font-bold text-white">Buscar Productos</h2>
         </div>
 
-        {/* Input de búsqueda */}
-        <div className="sm:p-2 border-b border-gray-800 bg-black/60 sticky top-0 z-20">
+        <div className="p-2 border-b border-gray-800 bg-black/60 sticky top-0 z-20">
           <input
             type="text"
-            className="w-full bg-gray-800 text-white rounded-lg p-2 border border-gray-700 focus:ring-2 focus:ring-yellow-400 text-lg font-medium shadow-sm transition-all duration-200 placeholder-gray-400"
-            placeholder="Buscar por nombre, descripción o material..."
+            className="w-full bg-gray-800 text-white rounded p-2 border border-gray-700 focus:ring-1 focus:ring-yellow-400 text-sm placeholder-gray-400"
+            placeholder="Buscar por nombre, material, modelo..."
             value={searchTerm}
             onChange={e => setSearchTerm(e.target.value)}
             autoFocus
           />
         </div>
 
-        {/* Filtros */}
-        <div className="p-2 sm:p-4 border-b border-gray-700">
-          <div className="flex flex-wrap items-center gap-2 sm:gap-4">
+        <div className="p-2 border-b border-gray-800">
+          <div className="flex flex-wrap items-center gap-2">
             <button
               onClick={() => setShowFilters(!showFilters)}
-              className={`flex items-center space-x-2 px-3 py-1.5 sm:px-4 sm:py-2 rounded-lg border transition-all duration-300 ${
+              className={`flex items-center space-x-1 px-2.5 py-1.5 rounded border text-xs ${
                 showFilters 
                   ? 'border-gray-300 bg-gray-300/10 text-gray-300' 
                   : 'border-gray-600 bg-gray-800 text-gray-300 hover:border-gray-500'
               }`}
             >
-              <SlidersHorizontal className="h-4 w-4" />
-              <span className="text-sm font-medium">Filtros</span>
+              <SlidersHorizontal className="h-3.5 w-3.5" />
+              <span>Filtros</span>
             </button>
 
             <select
               value={selectedCategory}
               onChange={(e) => setSelectedCategory(e.target.value)}
-              className="px-3 py-1.5 sm:px-4 sm:py-2 bg-gray-800 border border-gray-600 rounded-lg text-white text-sm focus:border-gray-300 focus:outline-none transition-colors duration-300"
+              className="px-2.5 py-1.5 bg-gray-800 border border-gray-600 rounded text-white text-xs focus:outline-none"
             >
               <option value="all">Todas las categorías</option>
               {categories.map(category => (
@@ -331,7 +351,7 @@ const SearchModal: React.FC<SearchModalProps> = ({
             <select
               value={sortBy}
               onChange={(e) => setSortBy(e.target.value)}
-              className="px-3 py-1.5 sm:px-4 sm:py-2 bg-gray-800 border border-gray-600 rounded-lg text-white text-sm focus:border-gray-300 focus:outline-none transition-colors duration-300"
+              className="px-2.5 py-1.5 bg-gray-800 border border-gray-600 rounded text-white text-xs focus:outline-none"
             >
               <option value="name">Nombre A-Z</option>
               <option value="price-low">Precio: Menor a Mayor</option>
@@ -342,27 +362,27 @@ const SearchModal: React.FC<SearchModalProps> = ({
 
             <button
               onClick={() => setShowOnlyDiscounted(!showOnlyDiscounted)}
-              className={`flex items-center space-x-2 px-3 py-1.5 sm:px-4 sm:py-2 rounded-lg border transition-all duration-300 ${
+              className={`flex items-center space-x-1 px-2.5 py-1.5 rounded border text-xs ${
                 showOnlyDiscounted
                   ? 'border-red-500 bg-red-500/10 text-red-400'
                   : 'border-gray-600 bg-gray-800 text-gray-300 hover:border-gray-500'
               }`}
             >
-              <Tag className="h-4 w-4" />
-              <span className="text-sm font-medium">Ofertas</span>
+              <Tag className="h-3.5 w-3.5" />
+              <span>Ofertas</span>
             </button>
           </div>
 
           {showFilters && (
-            <div className="mt-2 p-2 sm:mt-4 sm:p-4 bg-gray-800 rounded-xl border border-gray-700">
-              <h3 className="text-lg font-semibold text-white mb-4">Filtros Avanzados</h3>
+            <div className="mt-3 p-3 bg-gray-800 rounded border border-gray-700">
+              <h3 className="text-sm font-medium text-white mb-3">Filtros Avanzados</h3>
               
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-2 sm:gap-6">
+              <div className="space-y-3">
                 <div>
-                  <label className="block text-sm font-medium text-gray-300 mb-3">
+                  <label className="block text-xs font-medium text-gray-300 mb-2">
                     Rango de Precio: {formatPrice(priceRange.min)} - {formatPrice(priceRange.max)}
                   </label>
-                  <div className="space-y-3">
+                  <div className="space-y-2">
                     <div>
                       <label className="block text-xs text-gray-400 mb-1">Precio mínimo</label>
                       <input
@@ -372,7 +392,7 @@ const SearchModal: React.FC<SearchModalProps> = ({
                         step="100"
                         value={priceRange.min}
                         onChange={(e) => setPriceRange({...priceRange, min: parseInt(e.target.value)})}
-                        className="w-full"
+                        className="w-full h-1"
                       />
                     </div>
                     <div>
@@ -384,7 +404,7 @@ const SearchModal: React.FC<SearchModalProps> = ({
                         step="100"
                         value={priceRange.max}
                         onChange={(e) => setPriceRange({...priceRange, max: parseInt(e.target.value)})}
-                        className="w-full"
+                        className="w-full h-1"
                       />
                     </div>
                   </div>
@@ -394,21 +414,20 @@ const SearchModal: React.FC<SearchModalProps> = ({
           )}
         </div>
 
-        {/* Resultados */}
-        <div className="flex-1 overflow-y-auto p-4" style={{ maxHeight: 'calc(85vh - 200px)' }}>
+        <div className="flex-1 overflow-y-auto p-3" style={{ maxHeight: 'calc(80vh - 140px)' }}>
           {loading ? (
-            <div className="flex items-center justify-center h-32">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-300"></div>
-              <span className="ml-2 text-gray-300">Cargando productos...</span>
+            <div className="flex items-center justify-center h-24">
+              <div className="animate-spin rounded-full h-7 w-7 border-b-2 border-gray-300"></div>
+              <span className="ml-2 text-gray-300 text-sm">Cargando productos...</span>
             </div>
           ) : filteredAndSortedProducts.length === 0 ? (
-            <div className="text-center py-8">
-              <Search className="h-12 w-12 text-gray-500 mx-auto mb-4" />
-              <h3 className="text-lg font-semibold text-gray-300 mb-2">No se encontraron productos</h3>
-              <p className="text-gray-400">Intenta ajustar los filtros o términos de búsqueda</p>
+            <div className="text-center py-6">
+              <Search className="h-9 w-9 text-gray-500 mx-auto mb-2" />
+              <h3 className="text-sm font-semibold text-gray-300 mb-1">No se encontraron productos</h3>
+              <p className="text-gray-400 text-xs">Intenta ajustar los filtros o términos de búsqueda</p>
             </div>
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
               {filteredAndSortedProducts.map((product) => (
                 <SimplifiedProductCard key={product.id} product={product} />
               ))}

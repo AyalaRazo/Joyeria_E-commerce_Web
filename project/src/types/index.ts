@@ -23,6 +23,7 @@ export interface Product {
   in_stock?: boolean;
   is_new?: boolean;
   is_featured?: boolean;
+  is_active?: boolean;
   created_at?: string;
   updated_at?: string;
   category_id: number;
@@ -49,6 +50,7 @@ export interface ProductVariant {
   size?: string;
   stock?: number;
   original_price?: number;
+  is_active?: boolean;
   variant_images?: VariantImage[]; 
   images?: VariantImage[];
 }

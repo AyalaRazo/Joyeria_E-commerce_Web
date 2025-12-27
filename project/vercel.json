@@ -7,6 +7,10 @@
     {
       "source": "/videos/:path*",
       "destination": "https://xrtfrtiubugctntwbami.supabase.co/storage/v1/object/public/products/videos/:path*"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/"
     }
   ],
   "headers": [

@@ -62,7 +62,7 @@ const UserAddresses: React.FC = () => {
     <div className="min-h-screen bg-gradient-to-b from-black via-gray-900 to-black">
       <div className="max-w-4xl mx-auto px-4 py-10">
         <div className="flex items-center justify-between mb-6">
-          <h1 className="text-3xl font-bold text-gray-100">Mis Direcciones</h1>
+          <h1 className="text-2xl font-bold text-gray-100">Mis Direcciones</h1>
           <button
             onClick={() => { setEditing(null); setForm({ ...emptyAddress, is_default: addresses.length === 0 }); setFormOpen(true); }}
             className="inline-flex items-center space-x-2 px-4 py-2 bg-yellow-500 hover:bg-yellow-600 text-black font-semibold rounded-lg"

@@ -1,22 +1,71 @@
 import { supabase } from '../lib/supabase';
 
-// Construye la URL pública desde el path almacenado en BD usando rewrites de Vercel
-export const buildMediaUrl = (path: string): string => {
-  if (!path) return path;
+const isLocalhost = window.location.hostname === 'localhost' || 
+                    window.location.hostname === '127.0.0.1';
 
+// Construye la URL pública desde el path almacenado en BD usando rewrites de Vercel
+export const buildMediaUrl = (path: string | null | undefined): string => {
+  if (!path) return '/default-product-image.png';
+  
+  // Si ya es una URL completa (con http:// o https://), retornar tal cual
+  if (path.startsWith('http')) return path;
+  
+  // Si es localhost, usar Supabase directo
+  if (isLocalhost) {
+    return `https://xrtfrtiubugctntwbami.supabase.co/storage/v1/object/public/products/${path}`;
+  }
+
+  // Si el path ya incluye "videos/", asegurar que use la ruta correcta
   if (path.startsWith('videos/')) {
     return `/videos/${path.replace(/^videos\//, '')}`;
   }
 
+  // Si el path es muy largo (URL completa pero sin http), extraer la parte relevante
+  if (path.includes('supabase.co/storage/v1/object/public/products/')) {
+    // Extraer todo después de 'products/'
+    const match = path.match(/products\/(.+)$/);
+    if (match) {
+      const relativePath = match[1];
+      
+      // Verificar si es video
+      const isVideo = isVideoUrl(relativePath);
+      
+      if (isVideo) {
+        return `/videos/${relativePath}`;
+      } else {
+        return `/images/${relativePath}`;
+      }
+    }
+  }
+
+  // Para paths normales (anillos/nombre.jpg)
+  // Verificar si es video por extensión
+  const isVideo = isVideoUrl(path);
+  
+  if (isVideo) {
+    // Si no empieza con videos/, agregarlo
+    if (!path.startsWith('videos/')) {
+      return `/videos/${path}`;
+    }
+    return `/videos/${path.replace(/^videos\//, '')}`;
+  }
+  
+  // Para imágenes normales
   return `/images/${path}`;
 };
-
 
 // Función helper para detectar si una URL es un video
 export const isVideoUrl = (url: string): boolean => {
   if (!url) return false;
-  const videoExtensions = ['.mp4', '.webm', '.ogg', '.mov', '.avi'];
-  return videoExtensions.some(ext => url.toLowerCase().includes(ext)) || url.includes('/videos/');
+  
+  // Primero verificar si la URL contiene '/videos/' en el path
+  if (url.includes('/videos/')) return true;
+  
+  // Verificar extensiones de video
+  const videoExtensions = ['.mp4', '.webm', '.ogg', '.mov', '.avi', '.m4v', '.mkv'];
+  const urlLower = url.toLowerCase();
+  
+  return videoExtensions.some(ext => urlLower.endsWith(ext));
 };
 
 // Mapeo de categorías en inglés a español para las carpetas
@@ -110,6 +159,3 @@ export const uploadVideoToProductsBucket = async (
   // Guardamos solo el path relativo (sin dominio ni prefijos locales)
   return path;
 };
-
-
-

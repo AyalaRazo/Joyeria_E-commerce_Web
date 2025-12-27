@@ -30,6 +30,7 @@ import PrivacyPolicy from './pages/PrivacyPolicy';
 import TermsOfService from './pages/TermsOfService';
 import ReturnsPolicy from './pages/ReturnsPolicy';
 import InvoiceHelp from './pages/InvoiceHelp';
+import FavoritesPage from './pages/FavoritesPage';
 
 
 function App() {
@@ -248,6 +249,12 @@ function App() {
         <Route path="/addresses" element={
           <RequireUserAuth>
             <UserAddresses />
+          </RequireUserAuth>
+        } />
+
+        <Route path="/favorites" element={
+          <RequireUserAuth>
+            <FavoritesPage />
           </RequireUserAuth>
         } />
         

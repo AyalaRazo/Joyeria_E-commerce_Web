@@ -17,7 +17,7 @@ import {
 import { useUserManagement } from '../hooks/useUserManagement';
 import { useAuth } from '../hooks/useAuth';
 import { useProducts } from '../hooks/useProducts';
-import { uploadImageToProductsBucket, uploadVideoToProductsBucket, buildMediaUrl, isVideoUrl } from '../utils/storage';
+import { uploadImageToProductsBucket, buildMediaUrl, isVideoUrl } from '../utils/storage';
 
 const AdminPanel: React.FC = () => {
   type ShippingPackage = {
@@ -52,6 +52,8 @@ const AdminPanel: React.FC = () => {
   });
   const [searchTerm, setSearchTerm] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<number | 'all'>('all');
+  const [activeFilter, setActiveFilter] = useState<string>('all'); // Filtro para productos activos/inactivos
+  const [roleFilter, setRoleFilter] = useState<string>('all'); // Filtro para roles de usuarios
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [submittedFilter, setSubmittedFilter] = useState<string>('all');
   const [dateFilter, setDateFilter] = useState<{
@@ -85,9 +87,9 @@ const AdminPanel: React.FC = () => {
   } | null>(null);
   const [showAddProduct, setShowAddProduct] = useState(false);
   const [productMainImageFile, setProductMainImageFile] = useState<File | null>(null);
+  const [productMainImagePreview, setProductMainImagePreview] = useState<string | null>(null);
   const [productGalleryFiles, setProductGalleryFiles] = useState<FileList | null>(null);
-  const [productMainVideoFile, setProductMainVideoFile] = useState<File | null>(null);
-  const [productGalleryVideos, setProductGalleryVideos] = useState<FileList | null>(null);
+  const [productGalleryPreviews, setProductGalleryPreviews] = useState<string[]>([]);
   const [showReturnModal, setShowReturnModal] = useState<{
     show: boolean;
     orderId: number | null;
@@ -119,7 +121,8 @@ const AdminPanel: React.FC = () => {
     warranty_description: undefined as string | undefined,
     weight_grams: 100,
     is_high_value: false,
-    requires_special_shipping: false
+    requires_special_shipping: false,
+    is_active: false
   });
   const [showAddUser, setShowAddUser] = useState(false);
   const [newUser, setNewUser] = useState({
@@ -141,7 +144,10 @@ const AdminPanel: React.FC = () => {
     size: '',
     stock: 0,
     imageFile: null as File | null,
+    is_active: true
   });
+  const [newVariantImagePreview, setNewVariantImagePreview] = useState<string | null>(null);
+  const [newVariantGalleryPreviews, setNewVariantGalleryPreviews] = useState<string[]>([]);
   const [editingVariant, setEditingVariant] = useState<null | {
     id: number;
     product_id: number;
@@ -153,11 +159,15 @@ const AdminPanel: React.FC = () => {
     stock?: number;
     image?: string | null;
     variant_images?: Array<{ id: number; url: string }>;
+    is_active?: boolean;
   }>(null);
   const [editingVariantImageFile, setEditingVariantImageFile] = useState<File | null>(null);
+  const [editingVariantImagePreview, setEditingVariantImagePreview] = useState<string | null>(null);
   const [editingProductGalleryFiles, setEditingProductGalleryFiles] = useState<FileList | null>(null);
+  const [editingProductGalleryPreviews, setEditingProductGalleryPreviews] = useState<string[]>([]);
   const [newVariantGalleryFiles, setNewVariantGalleryFiles] = useState<FileList | null>(null);
   const [editingVariantGalleryFiles, setEditingVariantGalleryFiles] = useState<FileList | null>(null);
+  const [editingVariantGalleryPreviews, setEditingVariantGalleryPreviews] = useState<string[]>([]);
   const gallerySuffix = (base: string, index: number) => `${base}_${index + 1}`;
 
   // Estados para dashboard
@@ -203,6 +213,13 @@ const AdminPanel: React.FC = () => {
     orderId: number | null;
   }>({ show: false, orderId: null });
   const [orderDetails, setOrderDetails] = useState<any>(null);
+  const [showProductDetails, setShowProductDetails] = useState<{
+    show: boolean;
+    productId: number | null;
+  }>({ show: false, productId: null });
+  const [productDetails, setProductDetails] = useState<Product | null>(null);
+  const [imagesToDelete, setImagesToDelete] = useState<number[]>([]);
+  const [variantImagesToDelete, setVariantImagesToDelete] = useState<number[]>([]);
 
   // Fetch data based on active tab
   useEffect(() => {
@@ -275,6 +292,43 @@ const AdminPanel: React.FC = () => {
     } finally {
       setLoading(prev => ({ ...prev, packages: false }));
     }
+  };
+
+  // Helper functions for previews
+  const createImagePreview = (file: File): Promise<string> => {
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = (e) => resolve(e.target?.result as string);
+      reader.readAsDataURL(file);
+    });
+  };
+
+
+  // Función para clasificar producto (alto valor y envío especial)
+  const classifyProduct = (product: typeof newProduct | Product) => {
+    const weight = product.weight_grams || 100;
+    const price = product.price || 0;
+    const material = (product.material || '').toLowerCase();
+
+    let isHighValue = false;
+    let requiresSpecialShipping = false;
+
+    // Alto valor por precio
+    if (price >= 10000) {
+      isHighValue = true;
+    }
+
+    // Alto valor por material
+    if (material.includes('oro') || material.includes('diamante') || material.includes('platino')) {
+      isHighValue = true;
+    }
+
+    // Envío especial
+    if (isHighValue || weight > 500) {
+      requiresSpecialShipping = true;
+    }
+
+    return { isHighValue, requiresSpecialShipping };
   };
 
   const handleAddPackage = async () => {
@@ -552,26 +606,19 @@ const fetchOrderDetails = async (orderId: number) => {
     }
   };
 
-  const fetchOrders = async (page = 1, limit = 10) => {
+  const fetchOrders = async () => {
     setLoading(prev => ({ ...prev, orders: true }));
     try {
-      const from = (page - 1) * limit;
-      const to = from + limit - 1;
-
-      const { data, error, count } = await supabase
+      // Cargar todas las órdenes (sin límite) para paginación en frontend
+      const { data, error } = await supabase
         .from('orders')
-        .select('*, order_items(*, product:products(*))', { count: 'exact' })
+        .select('*, order_items(*, product:products(*))')
         .neq('status', 'reserved')
-        .order('created_at', { ascending: false })
-        .range(from, to);
+        .order('created_at', { ascending: false });
 
       if (error) throw error;
 
       setOrders(data || []);
-      setPagination(prev => ({
-        ...prev,
-        orders: { page, limit, total: count || 0 }
-      }));
     } catch (error) {
       console.error('Error fetching orders:', error);
     } finally {
@@ -654,19 +701,19 @@ const fetchOrderDetails = async (orderId: number) => {
         return;
       }
 
-      // Upload main image or video if provided
+      // Upload main image if provided
       let mainImageUrl = newProduct.image;
       if (productMainImageFile) {
         const categoryName = categories.find(c => c.id === newProduct.category_id)?.name || 'sin_categoria';
         mainImageUrl = await uploadImageToProductsBucket(productMainImageFile, categoryName, newProduct.name);
-      } else if (productMainVideoFile) {
-        const categoryName = categories.find(c => c.id === newProduct.category_id)?.name || 'sin_categoria';
-        mainImageUrl = await uploadVideoToProductsBucket(productMainVideoFile, categoryName, newProduct.name);
       }
       if (!mainImageUrl) {
-        alert('Selecciona una imagen o video principal para el producto.');
+        alert('Selecciona una imagen principal para el producto.');
         return;
       }
+
+      // Clasificar producto
+      const classification = classifyProduct(newProduct);
 
       const { data: inserted, error } = await supabase
         .from('products')
@@ -674,31 +721,23 @@ const fetchOrderDetails = async (orderId: number) => {
           ...newProduct, 
           image: mainImageUrl,
           weight_grams: newProduct.weight_grams || 100,
-          is_high_value: newProduct.is_high_value || false,
-          requires_special_shipping: newProduct.requires_special_shipping || false
+          is_high_value: classification.isHighValue,
+          requires_special_shipping: classification.requiresSpecialShipping,
+          is_active: newProduct.is_active ?? true
         }])
         .select('*')
         .single();
 
       if (error) throw error;
 
-      // Upload gallery images and videos to product_images
-      if (inserted && (productGalleryFiles || productGalleryVideos)) {
+      // Upload gallery images to product_images
+      if (inserted && productGalleryFiles) {
         const categoryName = categories.find(c => c.id === newProduct.category_id)?.name || 'sin_categoria';
         const urls: string[] = [];
         
-        if (productGalleryFiles) {
-          for (const [idx, file] of Array.from(productGalleryFiles).entries()) {
-            const url = await uploadImageToProductsBucket(file, categoryName, newProduct.name, gallerySuffix('galeria', idx));
+        for (const [idx, file] of Array.from(productGalleryFiles).entries()) {
+          const url = await uploadImageToProductsBucket(file, categoryName, newProduct.name, gallerySuffix('galeria', idx));
             urls.push(url);
-          }
-        }
-        
-        if (productGalleryVideos) {
-          for (const [idx, file] of Array.from(productGalleryVideos).entries()) {
-            const url = await uploadVideoToProductsBucket(file, categoryName, newProduct.name, gallerySuffix('video', idx));
-            urls.push(url);
-          }
         }
         
         const rows = urls.map((url, idx) => ({ product_id: inserted.id, url, ordering: idx }));
@@ -723,13 +762,14 @@ const fetchOrderDetails = async (orderId: number) => {
         warranty_description: undefined,
         weight_grams: 100,
         is_high_value: false,
-        requires_special_shipping: false
+        requires_special_shipping: false,
+        is_active: true
       });
       setShowAddProduct(false);
       setProductMainImageFile(null);
+      setProductMainImagePreview(null);
       setProductGalleryFiles(null);
-      setProductMainVideoFile(null);
-      setProductGalleryVideos(null);
+      setProductGalleryPreviews([]);
       fetchProducts();
     } catch (error) {
       console.error('Error adding product:', error);
@@ -739,14 +779,46 @@ const fetchOrderDetails = async (orderId: number) => {
 
   const handleEditProduct = async (product: Product) => {
     try {
-      // Optionally replace main image or video if a file was selected
+      // Optionally replace main image if a file was selected
       let updatedImage = product.image;
       if (productMainImageFile) {
         const categoryName = categories.find(c => c.id === product.category_id)?.name || 'sin_categoria';
         updatedImage = await uploadImageToProductsBucket(productMainImageFile, categoryName, product.name);
-      } else if (productMainVideoFile) {
-        const categoryName = categories.find(c => c.id === product.category_id)?.name || 'sin_categoria';
-        updatedImage = await uploadVideoToProductsBucket(productMainVideoFile, categoryName, product.name);
+      }
+
+      // Clasificar producto
+      const classification = classifyProduct(product);
+
+      // Eliminar imágenes marcadas para eliminar
+      if (imagesToDelete.length > 0) {
+        // Obtener las URLs de las imágenes antes de eliminarlas de la BD
+        const { data: imagesToRemove } = await supabase
+          .from('product_images')
+          .select('url')
+          .in('id', imagesToDelete);
+        
+        // Eliminar de la base de datos
+        await supabase.from('product_images').delete().in('id', imagesToDelete);
+        
+        // Eliminar del storage bucket
+        if (imagesToRemove && imagesToRemove.length > 0) {
+          const pathsToDelete = imagesToRemove
+            .map(img => img.url)
+            .filter(Boolean);
+          
+          for (const path of pathsToDelete) {
+            try {
+              const { error: storageError } = await supabase.storage
+                .from('products')
+                .remove([path]);
+              if (storageError) {
+                console.error(`Error eliminando ${path} del storage:`, storageError);
+              }
+            } catch (err) {
+              console.error(`Error eliminando ${path} del storage:`, err);
+            }
+          }
+        }
       }
 
       const { error } = await supabase
@@ -764,30 +836,26 @@ const fetchOrderDetails = async (orderId: number) => {
           is_new: product.is_new,
           is_featured: product.is_featured,
           weight_grams: product.weight_grams ?? 100,
-          is_high_value: product.is_high_value ?? false,
-          requires_special_shipping: product.requires_special_shipping ?? false
+          is_high_value: classification.isHighValue,
+          requires_special_shipping: classification.requiresSpecialShipping,
+          is_active: product.is_active ?? true,
+          has_warranty: product.has_warranty ?? false,
+          warranty_period: product.warranty_period,
+          warranty_unit: product.warranty_unit,
+          warranty_description: product.warranty_description
         })
         .eq('id', product.id);
 
       if (error) throw error;
 
-      if ((editingProductGalleryFiles && editingProductGalleryFiles.length > 0) || (productGalleryVideos && productGalleryVideos.length > 0)) {
-        const existingCount = product.images?.length || 0;
+      if (editingProductGalleryFiles && editingProductGalleryFiles.length > 0) {
+        const existingCount = (product.images?.length || 0) - imagesToDelete.length;
         const categoryName = categories.find(c => c.id === product.category_id)?.name || 'sin_categoria';
         const urls: string[] = [];
         
-        if (editingProductGalleryFiles) {
-          for (const [idx, file] of Array.from(editingProductGalleryFiles).entries()) {
-            const url = await uploadImageToProductsBucket(file, categoryName, product.name, gallerySuffix('galeria', existingCount + idx));
+        for (const [idx, file] of Array.from(editingProductGalleryFiles).entries()) {
+          const url = await uploadImageToProductsBucket(file, categoryName, product.name, gallerySuffix('galeria', existingCount + idx));
             urls.push(url);
-          }
-        }
-        
-        if (productGalleryVideos) {
-          for (const [idx, file] of Array.from(productGalleryVideos).entries()) {
-            const url = await uploadVideoToProductsBucket(file, categoryName, product.name, gallerySuffix('video', existingCount + idx));
-            urls.push(url);
-          }
         }
         
         const rows = urls.map((url, idx) => ({
@@ -800,9 +868,10 @@ const fetchOrderDetails = async (orderId: number) => {
 
       setEditingProduct(null);
       setProductMainImageFile(null);
-      setProductMainVideoFile(null);
+      setProductMainImagePreview(null);
       setEditingProductGalleryFiles(null);
-      setProductGalleryVideos(null);
+      setEditingProductGalleryPreviews([]);
+      setImagesToDelete([]);
       fetchProducts();
     } catch (error) {
       console.error('Error updating product:', error);
@@ -831,7 +900,8 @@ const fetchOrderDetails = async (orderId: number) => {
           model: newVariant.model,
           size: newVariant.size,
           stock: newVariant.stock,
-          image: imageUrl
+          image: imageUrl,
+          is_active: newVariant.is_active ?? true
         }])
         .select('*')
         .single();
@@ -853,8 +923,10 @@ const fetchOrderDetails = async (orderId: number) => {
       }
 
       setShowAddVariant({ show: false, productId: null });
-      setNewVariant({ name: '', price: 0, original_price: undefined, model: '', size: '', stock: 0, imageFile: null });
+      setNewVariant({ name: '', price: 0, original_price: undefined, model: '', size: '', stock: 0, imageFile: null, is_active: true });
       setNewVariantGalleryFiles(null);
+      setNewVariantImagePreview(null);
+      setNewVariantGalleryPreviews([]);
       fetchProducts();
     } catch (error) {
       console.error('Error adding variant:', error);
@@ -872,6 +944,38 @@ const fetchOrderDetails = async (orderId: number) => {
         imageUrl = await uploadImageToProductsBucket(editingVariantImageFile, categoryName, productName, `variante_${editingVariant.name}`);
       }
 
+      // Eliminar imágenes marcadas para eliminar
+      if (variantImagesToDelete.length > 0) {
+        // Obtener las URLs de las imágenes antes de eliminarlas de la BD
+        const { data: imagesToRemove } = await supabase
+          .from('variant_images')
+          .select('url')
+          .in('id', variantImagesToDelete);
+        
+        // Eliminar de la base de datos
+        await supabase.from('variant_images').delete().in('id', variantImagesToDelete);
+        
+        // Eliminar del storage bucket
+        if (imagesToRemove && imagesToRemove.length > 0) {
+          const pathsToDelete = imagesToRemove
+            .map(img => img.url)
+            .filter(Boolean);
+          
+          for (const path of pathsToDelete) {
+            try {
+              const { error: storageError } = await supabase.storage
+                .from('products')
+                .remove([path]);
+              if (storageError) {
+                console.error(`Error eliminando ${path} del storage:`, storageError);
+              }
+            } catch (err) {
+              console.error(`Error eliminando ${path} del storage:`, err);
+            }
+          }
+        }
+      }
+
       const { error } = await supabase
         .from('product_variants')
         .update({
@@ -881,7 +985,8 @@ const fetchOrderDetails = async (orderId: number) => {
           model: editingVariant.model,
           size: editingVariant.size,
           stock: editingVariant.stock,
-          image: imageUrl
+          image: imageUrl,
+          is_active: editingVariant.is_active ?? true
         })
         .eq('id', editingVariant.id);
 
@@ -889,11 +994,12 @@ const fetchOrderDetails = async (orderId: number) => {
 
       setEditingVariant(null);
       setEditingVariantImageFile(null);
+      setEditingVariantImagePreview(null);
       if (editingVariantGalleryFiles && editingVariantGalleryFiles.length > 0) {
         const parentProduct = products.find(p => p.id === editingVariant.product_id);
         const categoryName = categories.find(c => c.id === (parentProduct?.category_id || 1))?.name || 'sin_categoria';
         const productName = parentProduct?.name || 'variante';
-        const startIndex = editingVariant.variant_images?.length || 0;
+        const startIndex = (editingVariant.variant_images?.length || 0) - variantImagesToDelete.length;
         const urls: string[] = [];
         for (const [idx, file] of Array.from(editingVariantGalleryFiles).entries()) {
           const url = await uploadImageToProductsBucket(file, categoryName, productName, gallerySuffix('variante', startIndex + idx));
@@ -907,6 +1013,8 @@ const fetchOrderDetails = async (orderId: number) => {
         await supabase.from('variant_images').insert(rows);
       }
       setEditingVariantGalleryFiles(null);
+      setEditingVariantGalleryPreviews([]);
+      setVariantImagesToDelete([]);
       fetchProducts();
     } catch (error) {
       console.error('Error editing variant:', error);
@@ -926,28 +1034,62 @@ const fetchOrderDetails = async (orderId: number) => {
     }
   };
 
-  const handleDeleteProductImage = async (imageId: number) => {
-    try {
-      await supabase.from('product_images').delete().eq('id', imageId);
-      fetchProducts();
-    } catch (error) {
-      console.error('Error deleting product image:', error);
-    }
+  const handleDeleteProductImage = (imageId: number) => {
+    setImagesToDelete(prev => [...prev, imageId]);
   };
 
-  const handleDeleteVariantImage = async (imageId: number) => {
+  const handleDeleteVariantImage = (imageId: number) => {
+    setVariantImagesToDelete(prev => [...prev, imageId]);
+  };
+
+  const fetchProductDetails = async (productId: number) => {
     try {
-      await supabase.from('variant_images').delete().eq('id', imageId);
-      fetchProducts();
+      const { data, error } = await supabase
+        .from('products')
+        .select(`
+          *,
+          product_images(*),
+          product_variants(*, variant_images(*)),
+          category:categories(*)
+        `)
+        .eq('id', productId)
+        .single();
+
+      if (error) throw error;
+
+      const normalizedProduct = {
+        ...data,
+        images: (data.product_images || []).sort((a: any, b: any) => (a.ordering ?? 0) - (b.ordering ?? 0)),
+        variants: (data.product_variants || []).map((variant: any) => ({
+          ...variant,
+          variant_images: variant.variant_images || [],
+        })),
+      };
+
+      setProductDetails(normalizedProduct as Product);
     } catch (error) {
-      console.error('Error deleting variant image:', error);
+      console.error('Error fetching product details:', error);
     }
   };
 
   const handleDeleteProduct = async (productId: number) => {
-    if (!confirm('¿Estás seguro de que quieres eliminar este producto?')) return;
+    if (!confirm('¿Estás seguro de que quieres eliminar este producto? Esta acción no se puede deshacer.')) return;
 
     try {
+      // Verificar si el producto ha sido comprado
+      const { data: orderItems, error: checkError } = await supabase
+        .from('order_items')
+        .select('id')
+        .eq('product_id', productId)
+        .limit(1);
+
+      if (checkError) throw checkError;
+
+      if (orderItems && orderItems.length > 0) {
+        alert('No se puede eliminar este producto porque ya ha sido comprado. Puedes desactivarlo en su lugar.');
+        return;
+      }
+
       const { error } = await supabase
         .from('products')
         .delete()
@@ -956,8 +1098,10 @@ const fetchOrderDetails = async (orderId: number) => {
       if (error) throw error;
 
       fetchProducts();
+      alert('Producto eliminado correctamente.');
     } catch (error) {
       console.error('Error deleting product:', error);
+      alert('Error al eliminar el producto. Verifica que no haya sido comprado.');
     }
   };
 
@@ -1313,7 +1457,10 @@ const fetchOrderDetails = async (orderId: number) => {
     const matchesSearch = product.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       product.id.toString().includes(searchTerm.toLowerCase());
     const matchesCategory = categoryFilter === 'all' || product.category_id === categoryFilter;
-    return matchesSearch && matchesCategory;
+    const matchesActive = activeFilter === 'all' || 
+      (activeFilter === 'active' && product.is_active !== false) ||
+      (activeFilter === 'inactive' && product.is_active === false);
+    return matchesSearch && matchesCategory && matchesActive;
   });
 
 
@@ -1369,10 +1516,15 @@ const fetchOrderDetails = async (orderId: number) => {
     return matchesSearch && matchesDate;
   });
 
-  const filteredUsers = users.filter(userItem =>
-    userItem.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    (userItem.name && userItem.name.toLowerCase().includes(searchTerm.toLowerCase()))
-  );
+  const filteredUsers = users.filter(userItem => {
+    const matchesSearch = userItem.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (userItem.name && userItem.name.toLowerCase().includes(searchTerm.toLowerCase()));
+    const matchesRole = roleFilter === 'all' || 
+      (roleFilter === 'admin' && userItem.role === 'admin') ||
+      (roleFilter === 'worker' && userItem.role === 'worker') ||
+      (roleFilter === 'customer' && (userItem.role === 'customer' || !userItem.role));
+    return matchesSearch && matchesRole;
+  });
   const filteredPackages = packages.filter(pkg =>
     pkg.name.toLowerCase().includes(searchTerm.toLowerCase())
   );
@@ -1388,7 +1540,7 @@ const fetchOrderDetails = async (orderId: number) => {
       couriers: { ...prev.couriers, page: 1 },
       packages: { ...prev.packages, page: 1 }
     }));
-  }, [statusFilter, submittedFilter, dateFilter.startDate, dateFilter.endDate, searchTerm, categoryFilter]);
+  }, [statusFilter, submittedFilter, dateFilter.startDate, dateFilter.endDate, searchTerm, categoryFilter, activeFilter, roleFilter]);
 
   // Componente de paginación - ahora funciona con datos filtrados
   const PaginationControls = ({ type, filteredData, onPageChange }: { 
@@ -1458,9 +1610,9 @@ const fetchOrderDetails = async (orderId: number) => {
 
   return (
     <div className="min-h-screen bg-gray-900 text-gray-100">
-      <div className="max-w-7xl mx-auto px-4 py-8">
-        <div className="flex items-center justify-between mb-8">
-          <h1 className="text-3xl font-bold">Panel de Administración</h1>
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6">
+        <div className="flex items-center justify-between mb-4 sm:mb-6">
+          <h1 className="text-base sm:text-lg font-bold">Panel de Administración</h1>
           <div className="flex items-center space-x-4">
             <span className="text-sm text-gray-400">
               Usuario: {user?.name || user?.email}
@@ -1475,7 +1627,7 @@ const fetchOrderDetails = async (orderId: number) => {
         </div>
 
         {/* Tabs */}
-        <div className="flex border-b border-gray-700 mb-6">
+        <div className="flex border-b border-gray-700 mb-4 sm:mb-6 text-xs sm:text-sm overflow-x-auto">
           {isAdmin() && (
             <button
               className={`px-4 py-2 font-medium ${activeTab === 'dashboard' ? 'text-yellow-400 border-b-2 border-yellow-400' : 'text-gray-400 hover:text-gray-300'}`}
@@ -1533,7 +1685,7 @@ const fetchOrderDetails = async (orderId: number) => {
         {/* Search and Actions */}
         <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between mb-6 gap-4">
           <div className="flex flex-col sm:flex-row gap-4 flex-1">
-            {activeTab !== 'dashboard' && (
+            {activeTab !== 'dashboard' && activeTab !== 'couriers' && activeTab !== 'packages' && (
               <div className="relative flex-1 max-w-md">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
                 <input
@@ -1548,7 +1700,7 @@ const fetchOrderDetails = async (orderId: number) => {
 
             {/* Filtros específicos por tab */}
             {activeTab === 'products' && (
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <Filter className="h-5 w-5 text-gray-400" />
                 <select
                   value={categoryFilter}
@@ -1559,6 +1711,15 @@ const fetchOrderDetails = async (orderId: number) => {
                   {categories.map(category => (
                     <option key={category.id} value={category.id}>{category.name}</option>
                   ))}
+                </select>
+                <select
+                  value={activeFilter}
+                  onChange={(e) => setActiveFilter(e.target.value)}
+                  className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm"
+                >
+                  <option value="all">Todos los estados</option>
+                  <option value="active">Activos</option>
+                  <option value="inactive">Inactivos</option>
                 </select>
               </div>
             )}
@@ -1575,6 +1736,7 @@ const fetchOrderDetails = async (orderId: number) => {
                   <option value="pendiente">Pendiente (No pagado)</option>
                   <option value="pagado">Pagado</option>
                   <option value="procesando">Procesando</option>
+                  <option value="enviado">Enviado</option>
                   <option value="entregado">Entregado</option>
                   <option value="cancelado">Cancelado</option>
                   <option value="reembolsado">Reembolsado</option>
@@ -1758,63 +1920,86 @@ const fetchOrderDetails = async (orderId: number) => {
           transition={{ delay: i * 0.1 }}
           className={`bg-gradient-to-r ${metric.color} border rounded-lg p-6`}
         >
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-medium text-gray-300">{metric.title}</p>
-              <p className="text-2xl font-bold text-white mt-1">{metric.value}</p>
+          <div className="grid grid-cols-5 gap-4 h-full">
+            {/* Columna para texto (4/5 del ancho) */}
+            <div className="col-span-4">
+              <p className="text-xs font-medium text-gray-300 mb-1">{metric.title}</p>
+              <p className="text-sm font-bold text-white truncate">{metric.value}</p>
             </div>
+            
+            {/* Columna para icono (1/5 del ancho) - alineado al centro */}
+            <div className="col-span-1 flex items-center justify-center">
+              <div className="w-6 h-6 flex items-center justify-center bg-black/20 rounded-full">
             {metric.icon}
+              </div>
+            </div>
           </div>
         </motion.div>
       ))}
     </div>
 
     {/* 📈 Gráfico de evolución de ventas */}
-<div className="bg-gray-800 rounded-lg p-6">
-  <h3 className="text-lg font-semibold text-white mb-4">Evolución de Ventas</h3>
-  <ResponsiveContainer width="100%" height={300}>
-    <LineChart data={dashboardData.salesSummary.slice().reverse()}>
-      <CartesianGrid strokeDasharray="3 3" stroke="#444" />
-      <XAxis 
-        dataKey="date" 
-        stroke="#aaa"
-        tickFormatter={(dateStr) => {
-          // Formatear la fecha a "MMM DD" (ej: "Ene 15", "Feb 28")
-          const date = new Date(dateStr);
-          return date.toLocaleDateString('es-ES', { 
-            month: 'short', 
-            day: 'numeric' 
-          });
-        }}
-        tick={{ fontSize: 12 }}
-      />
-      <YAxis stroke="#aaa" />
-      <Tooltip 
-        contentStyle={{ backgroundColor: '#1f2937', border: 'none' }}
-        formatter={(value, name) => {
-          const nameMap: Record<string, string> = {
-            total_sales: 'Ventas',
-            total_orders: 'Pedidos'
-          };
-          return [value, nameMap[name as string] || name];
-        }}
-        labelFormatter={(dateStr) => {
-          // Formatear también el tooltip para mostrar fecha completa
-          const date = new Date(dateStr);
-          return date.toLocaleDateString('es-ES', { 
-            year: 'numeric',
-            month: 'long', 
-            day: 'numeric' 
-          });
-        }}
-      />
-      <Line type="monotone" dataKey="total_sales" stroke="#22c55e" strokeWidth={2} dot={false} />
-      <Line type="monotone" dataKey="total_orders" stroke="#3b82f6" strokeWidth={2} dot={false} />
-    </LineChart>
-  </ResponsiveContainer>
-</div>
-
-    
+    <div className="bg-gray-800 rounded-lg p-6">
+      <h3 className="text-lg font-semibold text-white mb-4">Evolución de Ventas</h3>
+      <ResponsiveContainer width="100%" height={300}>
+        <LineChart data={dashboardData.salesSummary.slice().reverse()}>
+          <CartesianGrid strokeDasharray="3 3" stroke="#444" />
+          <XAxis 
+            dataKey="date" 
+            stroke="#aaa"
+            tickFormatter={(dateStr, index) => {
+              const date = new Date(dateStr);
+              const dataLength = dashboardData.salesSummary.length;
+              
+              // Determinar si mostrar esta etiqueta
+              let shouldShow = false;
+              
+              if (dataLength <= 10) {
+                shouldShow = true; // Mostrar todas si son pocas
+              } else if (dataLength <= 20) {
+                shouldShow = index % 2 === 0; // Mostrar cada 2da
+              } else if (dataLength <= 30) {
+                shouldShow = index % 3 === 0; // Mostrar cada 3ra
+              } else {
+                shouldShow = index % Math.ceil(dataLength / 8) === 0; // Máximo 8
+              }
+              
+              if (shouldShow) {
+                return date.toLocaleDateString('es-ES', { 
+                  month: 'numeric', 
+                  day: 'numeric' 
+                });
+              }
+              return '';
+            }}
+            tick={{ fontSize: 11 }}
+            interval={0} // Importante: desactivar intervalo automático
+            height={40}
+          />
+          <YAxis stroke="#aaa" />
+          <Tooltip 
+            contentStyle={{ backgroundColor: '#1f2937', border: 'none' }}
+            formatter={(value, name) => {
+              const nameMap: Record<string, string> = {
+                total_sales: 'Ventas',
+                total_orders: 'Pedidos'
+              };
+              return [value, nameMap[name as string] || name];
+            }}
+            labelFormatter={(dateStr) => {
+              const date = new Date(dateStr);
+              return date.toLocaleDateString('es-ES', { 
+                year: 'numeric',
+                month: 'long', 
+                day: 'numeric' 
+              });
+            }}
+          />
+          <Line type="monotone" dataKey="total_sales" stroke="#22c55e" strokeWidth={2} dot={false} />
+          <Line type="monotone" dataKey="total_orders" stroke="#3b82f6" strokeWidth={2} dot={false} />
+        </LineChart>
+      </ResponsiveContainer>
+    </div>
   </div>
 )}
 
@@ -1832,6 +2017,7 @@ const fetchOrderDetails = async (orderId: number) => {
                     <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Producto</th>
                     <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Precio</th>
                     <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Categoría</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Estado</th>
                     <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Stock</th>
                     <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Variantes</th>
                     <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Acciones</th>
@@ -1851,7 +2037,7 @@ const fetchOrderDetails = async (orderId: number) => {
         {isVideoUrl(product.image) ? (
           <video
             src={buildMediaUrl(product.image)}
-                                className="h-10 w-10 rounded-md object-cover"
+                                className="h-8 w-8 rounded-md object-cover"
                                 muted
                                 playsInline
                               />
@@ -1859,7 +2045,7 @@ const fetchOrderDetails = async (orderId: number) => {
           <img
             src={buildMediaUrl(product.image)}
                                 alt={product.name}
-                                className="h-10 w-10 rounded-md object-cover"
+                                className="h-8 w-8 rounded-md object-cover"
                               />
                             )}
                             <div className="ml-4">
@@ -1879,6 +2065,11 @@ const fetchOrderDetails = async (orderId: number) => {
                         <td className="px-6 py-4 whitespace-nowrap">
                           <span className="px-2 py-1 bg-gray-700 rounded text-sm">
                             {categories.find(c => c.id === product.category_id)?.name || 'Sin categoría'}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <span className={`px-2 py-1 rounded-full text-xs font-medium ${product.is_active !== false ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
+                            {product.is_active !== false ? 'Activo' : 'Inactivo'}
                           </span>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
@@ -1941,7 +2132,7 @@ const fetchOrderDetails = async (orderId: number) => {
                             <button
                               onClick={() => {
                                 setShowAddVariant({ show: true, productId: Number(product.id) });
-                                setNewVariant({ name: '', price: 0, original_price: undefined, model: '', size: '', stock: 0, imageFile: null });
+                                setNewVariant({ name: '', price: 0, original_price: undefined, model: '', size: '', stock: 0, imageFile: null, is_active: true });
                                 setNewVariantGalleryFiles(null);
                               }}
                               className="text-yellow-400 hover:text-yellow-300"
@@ -1950,6 +2141,10 @@ const fetchOrderDetails = async (orderId: number) => {
                               <Plus className="h-4 w-4" />
                             </button>
                             <button
+                              onClick={() => {
+                                fetchProductDetails(product.id);
+                                setShowProductDetails({ show: true, productId: product.id });
+                              }}
                               className="text-green-400 hover:text-green-300"
                               title="Ver detalles"
                             >
@@ -2179,14 +2374,14 @@ const fetchOrderDetails = async (orderId: number) => {
                         );
                       })()}
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Orden ID</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Fecha</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Estado</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Total</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Enviado</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Código de Rastreo</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Paquetería</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Acciones</th>
+                    <th className="px-3 sm:px-6 py-2 sm:py-3 text-left text-xs font-medium uppercase tracking-wider">Orden ID</th>
+                    <th className="px-3 sm:px-6 py-2 sm:py-3 text-left text-xs font-medium uppercase tracking-wider">Fecha</th>
+                    <th className="px-3 sm:px-6 py-2 sm:py-3 text-left text-xs font-medium uppercase tracking-wider">Estado</th>
+                    <th className="px-3 sm:px-6 py-2 sm:py-3 text-left text-xs font-medium uppercase tracking-wider">Total</th>
+                    <th className="px-3 sm:px-6 py-2 sm:py-3 text-left text-xs font-medium uppercase tracking-wider">Enviado</th>
+                    <th className="px-3 sm:px-6 py-2 sm:py-3 text-left text-xs font-medium uppercase tracking-wider">Código de Rastreo</th>
+                    <th className="px-3 sm:px-6 py-2 sm:py-3 text-left text-xs font-medium uppercase tracking-wider">Paquetería</th>
+                    <th className="px-3 sm:px-6 py-2 sm:py-3 text-left text-xs font-medium uppercase tracking-wider">Acciones</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-700">
@@ -2205,16 +2400,16 @@ const fetchOrderDetails = async (orderId: number) => {
                           aria-label={`Seleccionar orden ${order.id}`}
                         />
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="font-medium">#{order.id}</div>
-                        <div className="text-gray-400 text-sm">
+                      <td className="px-3 sm:px-6 py-3 sm:py-4 whitespace-nowrap">
+                        <div className="font-medium text-sm">#{order.id}</div>
+                        <div className="text-gray-400 text-xs">
                           {order.order_items?.length || 0} producto(s)
                         </div>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
+                      <td className="px-3 sm:px-6 py-3 sm:py-4 whitespace-nowrap text-sm">
                         {order.created_at ? new Date(order.created_at).toLocaleDateString() : 'N/A'}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
+                      <td className="px-3 sm:px-6 py-3 sm:py-4 whitespace-nowrap">
                         <span
                           className={`px-2 py-1 rounded-full text-xs font-medium ${order.status === 'entregado'
                             ? 'bg-green-500/20 text-green-400'
@@ -2228,10 +2423,10 @@ const fetchOrderDetails = async (orderId: number) => {
                           {order.status}
                         </span>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
+                      <td className="px-3 sm:px-6 py-3 sm:py-4 whitespace-nowrap text-sm">
                         ${order.total.toFixed(2)}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
+                      <td className="px-3 sm:px-6 py-3 sm:py-4 whitespace-nowrap">
                         {editingSubmitted?.orderId === order.id ? (
                           <div className="flex items-center space-x-2">
                             <select
@@ -2282,7 +2477,7 @@ const fetchOrderDetails = async (orderId: number) => {
                           </div>
                         )}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
+                      <td className="px-3 sm:px-6 py-3 sm:py-4 whitespace-nowrap">
                         {editingTracking?.orderId === order.id ? (
                           <div className="flex items-center space-x-2">
                             <input
@@ -2334,7 +2529,7 @@ const fetchOrderDetails = async (orderId: number) => {
                           </div>
                         )}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
+                      <td className="px-3 sm:px-6 py-3 sm:py-4 whitespace-nowrap">
                         {editingCourier?.orderId === order.id ? (
                           <div className="flex items-center space-x-2">
                             <select
@@ -2383,7 +2578,7 @@ const fetchOrderDetails = async (orderId: number) => {
                           </div>
                         )}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
+                      <td className="px-3 sm:px-6 py-3 sm:py-4 whitespace-nowrap">
                         <div className="flex items-center space-x-2">
                           <button
                             onClick={() => {
@@ -2393,7 +2588,7 @@ const fetchOrderDetails = async (orderId: number) => {
                             className="text-blue-400 hover:text-blue-300"
                             title="Ver detalles"
                           >
-                            <Eye className="h-4 w-4" />
+                            <Eye className="h-3 w-3 sm:h-4 sm:w-4" />
                           </button>
                           {order.status !== 'devuelto' && order.status !== 'cancelado' && (
                             <button
@@ -2415,54 +2610,7 @@ const fetchOrderDetails = async (orderId: number) => {
                 </tbody>
               </table>
             )}
-            {(() => {
-              const currentPagination = pagination.orders;
-              const totalRecords = filteredOrders.length;
-              const totalPages = Math.max(1, Math.ceil(totalRecords / currentPagination.limit));
-              const startIndex = (currentPagination.page - 1) * currentPagination.limit;
-              const endIndex = startIndex + currentPagination.limit;
-
-              if (totalPages <= 1) return null;
-
-              return (
-                <div className="flex items-center justify-between px-6 py-3 bg-gray-700">
-                  <div className="text-sm text-gray-400">
-                    Mostrando {startIndex + 1} - {Math.min(endIndex, totalRecords)} de {totalRecords}
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <button
-                      onClick={() => {
-                        setPagination(prev => ({
-                          ...prev,
-                          orders: { ...prev.orders, page: prev.orders.page - 1 }
-                        }));
-                        window.scrollTo(0, 0);
-                      }}
-                      disabled={currentPagination.page <= 1}
-                      className="px-3 py-1 bg-gray-600 hover:bg-gray-500 disabled:opacity-50 disabled:cursor-not-allowed rounded text-sm"
-                    >
-                      Anterior
-                    </button>
-                    <span className="text-sm text-gray-300">
-                      Página {currentPagination.page} de {totalPages}
-                    </span>
-                    <button
-                      onClick={() => {
-                        setPagination(prev => ({
-                          ...prev,
-                          orders: { ...prev.orders, page: prev.orders.page + 1 }
-                        }));
-                        window.scrollTo(0, 0);
-                      }}
-                      disabled={currentPagination.page >= totalPages}
-                      className="px-3 py-1 bg-gray-600 hover:bg-gray-500 disabled:opacity-50 disabled:cursor-not-allowed rounded text-sm"
-                    >
-                      Siguiente
-                    </button>
-                  </div>
-                </div>
-              );
-            })()}
+            <PaginationControls type="orders" filteredData={filteredOrders} />
           </div>
         )}
 
@@ -2681,16 +2829,32 @@ const fetchOrderDetails = async (orderId: number) => {
                 <RefreshCw className="h-6 w-6 animate-spin text-yellow-400" />
               </div>
             ) : (
-              <table className="w-full">
-                <thead className="bg-gray-700">
-                  <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Usuario</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Email</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Rol Actual</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Fecha Registro</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Acciones</th>
-                  </tr>
-                </thead>
+              <>
+                <div className="p-4 border-b border-gray-700">
+                  <div className="flex items-center gap-2">
+                    <Filter className="h-5 w-5 text-gray-400" />
+                    <select
+                      value={roleFilter}
+                      onChange={(e) => setRoleFilter(e.target.value)}
+                      className="bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white"
+                    >
+                      <option value="all">Todos los roles</option>
+                      <option value="admin">Admin</option>
+                      <option value="worker">Worker</option>
+                      <option value="customer">Customer</option>
+                    </select>
+                  </div>
+                </div>
+                <table className="w-full">
+                  <thead className="bg-gray-700">
+                    <tr>
+                      <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Usuario</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Email</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Rol Actual</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Fecha Registro</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Acciones</th>
+                    </tr>
+                  </thead>
                 <tbody className="divide-y divide-gray-700">
                   {(() => {
                     const currentPagination = pagination.users;
@@ -2734,6 +2898,7 @@ const fetchOrderDetails = async (orderId: number) => {
                   })()}
                 </tbody>
               </table>
+              </>
             )}
             {(() => {
               const currentPagination = pagination.users;
@@ -2791,15 +2956,36 @@ const fetchOrderDetails = async (orderId: number) => {
       {showAddProduct && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-gray-800 rounded-lg p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-            <h3 className="text-lg font-bold mb-4">Agregar Nuevo Producto</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="flex justify-between items-center mb-3 sm:mb-4">
+              <h3 className="text-base sm:text-lg font-bold">Agregar Nuevo Producto</h3>
+              <label className="flex items-center cursor-pointer">
+                <div className="relative">
+                  <input
+                    type="checkbox"
+                    checked={newProduct.is_active ?? false}
+                    onChange={(e) => setNewProduct({ ...newProduct, is_active: e.target.checked })}
+                    className="sr-only"
+                  />
+                  <div className={`block w-14 h-8 rounded-full ${
+                    newProduct.is_active ? 'bg-green-500' : 'bg-gray-300'
+                  }`}></div>
+                  <div className={`absolute left-1 top-1 bg-white w-6 h-6 rounded-full transition-transform duration-200 ${
+                    newProduct.is_active ? 'transform translate-x-6' : ''
+                  }`}></div>
+                </div>
+                <span className="ml-3 text-gray-300 font-medium">
+                  {newProduct.is_active ? 'Activo' : 'Inactivo'}
+                </span>
+              </label>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
               <div>
-                <label className="block text-gray-300 mb-1">Nombre</label>
+                <label className="block text-gray-300 mb-1 text-sm">Nombre</label>
                 <input
                   type="text"
                   value={newProduct.name}
                   onChange={(e) => setNewProduct({ ...newProduct, name: e.target.value })}
-                  className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
+                  className="w-full bg-gray-700 border border-gray-600 rounded px-2 sm:px-3 py-1.5 sm:py-2 text-sm"
                   placeholder="Nombre del producto"
                 />
               </div>
@@ -2860,48 +3046,49 @@ const fetchOrderDetails = async (orderId: number) => {
                 <input
                   type="file"
                   accept="image/*"
-                  className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
-                  onChange={(e) => {
-                    setProductMainImageFile(e.target.files && e.target.files[0] ? e.target.files[0] : null);
-                    setProductMainVideoFile(null);
+                  className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-sm"
+                  onChange={async (e) => {
+                    const file = e.target.files && e.target.files[0] ? e.target.files[0] : null;
+                    setProductMainImageFile(file);
+                    if (file) {
+                      const preview = await createImagePreview(file);
+                      setProductMainImagePreview(preview);
+                    } else {
+                      setProductMainImagePreview(null);
+                    }
                   }}
                 />
-                {productMainImageFile && (
-                  <p className="text-xs text-gray-400 mt-1">{productMainImageFile.name}</p>
-                )}
+                {productMainImagePreview && (
+                  <div className="mt-2">
+                    <img src={productMainImagePreview} alt="Preview" className="h-32 w-full object-cover rounded-lg border border-gray-700" />
               </div>
-              <div>
-                <label className="block text-gray-300 mb-1">Video Principal (opcional, reemplaza imagen)</label>
-                <input
-                  type="file"
-                  accept="video/*"
-                  className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
-                  onChange={(e) => {
-                    setProductMainVideoFile(e.target.files && e.target.files[0] ? e.target.files[0] : null);
-                    setProductMainImageFile(null);
-                  }}
-                />
-                {productMainVideoFile && (
-                  <p className="text-xs text-gray-400 mt-1">{productMainVideoFile.name}</p>
                 )}
               </div>
               <div className="md:col-span-2">
-                <label className="block text-gray-300 mb-1">Imágenes Complementarias</label>
+                <label className="block text-gray-300 mb-1 text-sm">Imágenes Complementarias</label>
                 <input
                   type="file"
                   accept="image/*"
                   multiple
-                  className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 mb-2"
-                  onChange={(e) => setProductGalleryFiles(e.target.files)}
+                  className="w-full bg-gray-700 border border-gray-600 rounded px-2 sm:px-3 py-1.5 sm:py-2 text-sm"
+                  onChange={async (e) => {
+                    const files = e.target.files;
+                    setProductGalleryFiles(files);
+                    if (files) {
+                      const previews = await Promise.all(Array.from(files).map(createImagePreview));
+                      setProductGalleryPreviews(previews);
+                    } else {
+                      setProductGalleryPreviews([]);
+                    }
+                  }}
                 />
-                <label className="block text-gray-300 mb-1">Videos Complementarios</label>
-                <input
-                  type="file"
-                  accept="video/*"
-                  multiple
-                  className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
-                  onChange={(e) => setProductGalleryVideos(e.target.files)}
-                />
+                {productGalleryPreviews.length > 0 && (
+                  <div className="flex flex-wrap gap-2 mt-2">
+                    {productGalleryPreviews.map((preview, idx) => (
+                      <img key={idx} src={preview} alt={`Preview ${idx + 1}`} className="h-20 w-20 object-cover rounded-lg border border-gray-700" />
+                    ))}
+                  </div>
+                )}
               </div>
               {/* Estado y flags principales */}
               <div className="md:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -2940,23 +3127,23 @@ const fetchOrderDetails = async (orderId: number) => {
                 <div className="flex flex-col space-y-2">
                   <span className="text-gray-300 text-sm font-medium">Envío y valor</span>
                   <div className="flex flex-wrap gap-4">
-                    <label className="flex items-center">
+                    <label className="flex items-center opacity-60 cursor-not-allowed">
                       <input
                         type="checkbox"
                         checked={newProduct.is_high_value || false}
-                        onChange={(e) => setNewProduct({ ...newProduct, is_high_value: e.target.checked })}
+                        disabled
                         className="mr-2"
                       />
-                      Alto Valor
+                      Alto Valor (determinado automáticamente)
                     </label>
-                    <label className="flex items-center">
+                    <label className="flex items-center opacity-60 cursor-not-allowed">
                       <input
                         type="checkbox"
                         checked={newProduct.requires_special_shipping || false}
-                        onChange={(e) => setNewProduct({ ...newProduct, requires_special_shipping: e.target.checked })}
+                        disabled
                         className="mr-2"
                       />
-                      Requiere Envío Especial
+                      Requiere Envío Especial (determinado automáticamente)
                     </label>
                     <label className="flex items-center">
                       <input
@@ -2967,6 +3154,7 @@ const fetchOrderDetails = async (orderId: number) => {
                       />
                       Tiene Garantía
                     </label>
+                    
                   </div>
                 </div>
               </div>
@@ -3197,8 +3385,8 @@ const fetchOrderDetails = async (orderId: number) => {
       {editingProduct && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-gray-800 rounded-lg p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-            <h3 className="text-lg font-bold mb-4">Editar Producto</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <h3 className="text-base sm:text-lg font-bold mb-3 sm:mb-4">Editar Producto</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
               <div>
                 <label className="block text-gray-300 mb-1">Nombre</label>
                 <input
@@ -3269,30 +3457,33 @@ const fetchOrderDetails = async (orderId: number) => {
                   <input
                     type="file"
                     accept="image/*"
-                    className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
-                    onChange={(e) => {
-                      setProductMainImageFile(e.target.files && e.target.files[0] ? e.target.files[0] : null);
-                      setProductMainVideoFile(null);
+                    className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-sm"
+                    onChange={async (e) => {
+                      const file = e.target.files && e.target.files[0] ? e.target.files[0] : null;
+                      setProductMainImageFile(file);
+                      if (file) {
+                        const preview = await createImagePreview(file);
+                        setProductMainImagePreview(preview);
+                      } else {
+                        setProductMainImagePreview(null);
+                      }
                     }}
                   />
-                  <label className="block text-gray-300 text-sm">Video Principal (opcional, reemplaza imagen)</label>
-                  <input
-                    type="file"
-                    accept="video/*"
-                    className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 mt-2"
-                    onChange={(e) => {
-                      setProductMainVideoFile(e.target.files && e.target.files[0] ? e.target.files[0] : null);
-                      setProductMainImageFile(null);
-                    }}
-                  />
+                  {productMainImagePreview && (
+                    <div className="mt-2">
+                      <img src={productMainImagePreview} alt="Preview" className="h-24 w-full object-cover rounded-lg border border-gray-700" />
+                    </div>
+                  )}
                 </div>
               </div>
               <div className="md:col-span-2 space-y-2">
                 <label className="block text-gray-300 mb-1">Imágenes Complementarias</label>
                 <div className="flex flex-wrap gap-3">
                   {editingProduct.images && editingProduct.images.length > 0 ? (
-                    editingProduct.images.map(image => (
-                      <div key={image.id} className="relative">
+                    editingProduct.images.map(image => {
+                      const isMarkedForDelete = imagesToDelete.includes(image.id);
+                      return (
+                        <div key={image.id} className={`relative ${isMarkedForDelete ? 'opacity-50' : ''}`}>
                         {isVideoUrl(image.url) ? (
                           <video src={buildMediaUrl(image.url)} className="h-20 w-20 object-cover rounded-lg border border-gray-700" muted playsInline />
                         ) : (
@@ -3301,12 +3492,14 @@ const fetchOrderDetails = async (orderId: number) => {
                         <button
                           type="button"
                           onClick={() => handleDeleteProductImage(image.id)}
-                          className="absolute -top-2 -right-2 bg-red-600 text-white rounded-full h-5 w-5 text-xs"
+                            className={`absolute -top-2 -right-2 rounded-full h-5 w-5 text-xs ${isMarkedForDelete ? 'bg-gray-600 text-gray-300' : 'bg-red-600 text-white'}`}
+                            title={isMarkedForDelete ? 'Marcada para eliminar' : 'Eliminar'}
                         >
-                          ×
+                            {isMarkedForDelete ? '↩' : '×'}
                         </button>
                       </div>
-                    ))
+                      );
+                    })
                   ) : (
                     <p className="text-gray-500 text-sm">Sin imágenes adicionales</p>
                   )}
@@ -3315,17 +3508,25 @@ const fetchOrderDetails = async (orderId: number) => {
                   type="file"
                   accept="image/*"
                   multiple
-                  className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 mb-2"
-                  onChange={(e) => setEditingProductGalleryFiles(e.target.files)}
+                  className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 mb-2 text-sm"
+                  onChange={async (e) => {
+                    const files = e.target.files;
+                    setEditingProductGalleryFiles(files);
+                    if (files) {
+                      const previews = await Promise.all(Array.from(files).map(createImagePreview));
+                      setEditingProductGalleryPreviews(previews);
+                    } else {
+                      setEditingProductGalleryPreviews([]);
+                    }
+                  }}
                 />
-                <label className="block text-gray-300 mb-1">Videos Complementarios</label>
-                <input
-                  type="file"
-                  accept="video/*"
-                  multiple
-                  className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
-                  onChange={(e) => setProductGalleryVideos(e.target.files)}
-                />
+                {editingProductGalleryPreviews.length > 0 && (
+                  <div className="flex flex-wrap gap-2 mt-2 mb-2">
+                    {editingProductGalleryPreviews.map((preview, idx) => (
+                      <img key={idx} src={preview} alt={`Preview ${idx + 1}`} className="h-20 w-20 object-cover rounded-lg border border-gray-700" />
+                    ))}
+                  </div>
+                )}
               </div>
               {/* Estado y flags principales (edición) */}
               <div className="md:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -3364,23 +3565,23 @@ const fetchOrderDetails = async (orderId: number) => {
                 <div className="flex flex-col space-y-2">
                   <span className="text-gray-300 text-sm font-medium">Envío y valor</span>
                   <div className="flex flex-wrap gap-4">
-                    <label className="flex items-center">
+                    <label className="flex items-center opacity-60 cursor-not-allowed">
                       <input
                         type="checkbox"
                         checked={editingProduct.is_high_value || false}
-                        onChange={(e) => setEditingProduct({ ...editingProduct, is_high_value: e.target.checked })}
+                        disabled
                         className="mr-2"
                       />
-                      Alto Valor
+                      Alto Valor (determinado automáticamente)
                     </label>
-                    <label className="flex items-center">
+                    <label className="flex items-center opacity-60 cursor-not-allowed">
                       <input
                         type="checkbox"
                         checked={editingProduct.requires_special_shipping || false}
-                        onChange={(e) => setEditingProduct({ ...editingProduct, requires_special_shipping: e.target.checked })}
+                        disabled
                         className="mr-2"
                       />
-                      Requiere Envío Especial
+                      Requiere Envío Especial (determinado automáticamente)
                     </label>
                     <label className="flex items-center">
                       <input
@@ -3390,6 +3591,15 @@ const fetchOrderDetails = async (orderId: number) => {
                         className="mr-2"
                       />
                       Tiene Garantía
+                    </label>
+                    <label className="flex items-center">
+                      <input
+                        type="checkbox"
+                        checked={editingProduct.is_active ?? true}
+                        onChange={(e) => setEditingProduct({ ...editingProduct, is_active: e.target.checked })}
+                        className="mr-2"
+                      />
+                      Activo
                     </label>
                   </div>
                 </div>
@@ -3461,9 +3671,12 @@ const fetchOrderDetails = async (orderId: number) => {
                 onClick={() => {
                   setEditingProduct(null);
                   setProductMainImageFile(null);
+                  setProductMainImagePreview(null);
                   setEditingProductGalleryFiles(null);
+                  setEditingProductGalleryPreviews([]);
+                  setImagesToDelete([]);
                 }}
-                className="px-4 py-2 bg-gray-600 hover:bg-gray-700 rounded"
+                className="px-4 py-2 bg-gray-600 hover:bg-gray-700 rounded text-sm"
               >
                 Cancelar
               </button>
@@ -3694,8 +3907,8 @@ const fetchOrderDetails = async (orderId: number) => {
       {showAddVariant.show && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-gray-800 rounded-lg p-6 w-full max-w-md">
-            <h3 className="text-lg font-bold mb-4">Agregar Variante</h3>
-            <div className="space-y-4">
+            <h3 className="text-base sm:text-lg font-bold mb-3 sm:mb-4">Agregar Variante</h3>
+            <div className="space-y-3 sm:space-y-4">
               <div>
                 <label className="block text-gray-300 mb-1">Nombre</label>
                 <input
@@ -3756,24 +3969,66 @@ const fetchOrderDetails = async (orderId: number) => {
                   />
                 </div>
                 <div>
-                  <label className="block text-gray-300 mb-1">Imagen</label>
+                  <label className="block text-gray-300 mb-1 text-sm">Imagen Principal</label>
                   <input
                     type="file"
                     accept="image/*"
-                    onChange={(e) => setNewVariant({ ...newVariant, imageFile: e.target.files && e.target.files[0] ? e.target.files[0] : null })}
-                    className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
+                    onChange={async (e) => {
+                      const file = e.target.files && e.target.files[0] ? e.target.files[0] : null;
+                      setNewVariant({ ...newVariant, imageFile: file });
+                      if (file) {
+                        const preview = await createImagePreview(file);
+                        setNewVariantImagePreview(preview);
+                      } else {
+                        setNewVariantImagePreview(null);
+                      }
+                    }}
+                    className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-sm"
                   />
+                  {newVariantImagePreview && (
+                    <div className="mt-2">
+                      <img src={newVariantImagePreview} alt="Preview" className="h-24 w-full object-cover rounded-lg border border-gray-700" />
+                    </div>
+                  )}
                 </div>
               </div>
               <div>
-                <label className="block text-gray-300 mb-1">Imágenes complementarias</label>
+                <label className="block text-gray-300 mb-1 text-sm">Imágenes complementarias</label>
                 <input
                   type="file"
                   accept="image/*"
                   multiple
-                  className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
-                  onChange={(e) => setNewVariantGalleryFiles(e.target.files)}
+                  className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-sm"
+                  onChange={async (e) => {
+                    const files = e.target.files;
+                    setNewVariantGalleryFiles(files);
+                    if (files) {
+                      const previews = await Promise.all(Array.from(files).map(createImagePreview));
+                      setNewVariantGalleryPreviews(previews);
+                    } else {
+                      setNewVariantGalleryPreviews([]);
+                    }
+                  }}
                 />
+                {newVariantGalleryPreviews.length > 0 && (
+                  <div className="flex flex-wrap gap-2 mt-2">
+                    {newVariantGalleryPreviews.map((preview, idx) => (
+                      <img key={idx} src={preview} alt={`Preview ${idx + 1}`} className="h-20 w-20 object-cover rounded-lg border border-gray-700" />
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div>
+                <label className="block text-gray-300 mb-1 text-sm">Activo</label>
+                <label className="flex items-center">
+                  <input
+                    type="checkbox"
+                    checked={newVariant.is_active ?? true}
+                    onChange={(e) => setNewVariant({ ...newVariant, is_active: e.target.checked })}
+                    className="mr-2"
+                  />
+                  <span className="text-sm text-gray-300">Variante activa para clientes</span>
+                </label>
               </div>
             </div>
             <div className="flex justify-end space-x-2 mt-6">
@@ -3781,9 +4036,11 @@ const fetchOrderDetails = async (orderId: number) => {
                 onClick={() => {
                   setShowAddVariant({ show: false, productId: null });
                   setNewVariantGalleryFiles(null);
-                  setNewVariant({ name: '', price: 0, original_price: undefined, model: '', size: '', stock: 0, imageFile: null });
+                  setNewVariantImagePreview(null);
+                  setNewVariantGalleryPreviews([]);
+                  setNewVariant({ name: '', price: 0, original_price: undefined, model: '', size: '', stock: 0, imageFile: null, is_active: true });
                 }}
-                className="px-4 py-2 bg-gray-600 hover:bg-gray-700 rounded"
+                className="px-4 py-2 bg-gray-600 hover:bg-gray-700 rounded text-sm"
               >
                 Cancelar
               </button>
@@ -3802,8 +4059,8 @@ const fetchOrderDetails = async (orderId: number) => {
       {editingVariant && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-gray-800 rounded-lg p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-            <h3 className="text-lg font-bold mb-4">Editar Variante</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <h3 className="text-base sm:text-lg font-bold mb-3 sm:mb-4">Editar Variante</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
               <div className="md:col-span-2">
                 <label className="block text-gray-300 mb-1">Nombre</label>
                 <input
@@ -3877,17 +4134,45 @@ const fetchOrderDetails = async (orderId: number) => {
                   <input
                     type="file"
                     accept="image/*"
-                    className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
-                    onChange={(e) => setEditingVariantImageFile(e.target.files && e.target.files[0] ? e.target.files[0] : null)}
+                    className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-sm"
+                    onChange={async (e) => {
+                      const file = e.target.files && e.target.files[0] ? e.target.files[0] : null;
+                      setEditingVariantImageFile(file);
+                      if (file) {
+                        const preview = await createImagePreview(file);
+                        setEditingVariantImagePreview(preview);
+                      } else {
+                        setEditingVariantImagePreview(null);
+                      }
+                    }}
                   />
+                  {editingVariantImagePreview && (
+                    <div className="mt-2">
+                      <img src={editingVariantImagePreview} alt="Preview" className="h-24 w-full object-cover rounded-lg border border-gray-700" />
                 </div>
+                  )}
+                </div>
+              </div>
+              <div>
+                <label className="block text-gray-300 mb-1">Activo</label>
+                <label className="flex items-center">
+                  <input
+                    type="checkbox"
+                    checked={editingVariant.is_active ?? true}
+                    onChange={(e) => setEditingVariant({ ...editingVariant, is_active: e.target.checked })}
+                    className="mr-2"
+                  />
+                  <span className="text-sm text-gray-300">Producto activo para clientes</span>
+                </label>
               </div>
               <div className="md:col-span-2 space-y-2">
                 <label className="block text-gray-300 mb-1">Imágenes complementarias</label>
                 <div className="flex flex-wrap gap-3">
                   {editingVariant?.variant_images && editingVariant.variant_images.length > 0 ? (
-                    editingVariant.variant_images.map(image => (
-                      <div key={image.id} className="relative">
+                    editingVariant.variant_images.map(image => {
+                      const isMarkedForDelete = variantImagesToDelete.includes(image.id);
+                      return (
+                        <div key={image.id} className={`relative ${isMarkedForDelete ? 'opacity-50' : ''}`}>
                         {isVideoUrl(image.url) ? (
                           <video src={buildMediaUrl(image.url)} className="h-20 w-20 object-cover rounded-lg border border-gray-700" muted playsInline />
                         ) : (
@@ -3896,12 +4181,14 @@ const fetchOrderDetails = async (orderId: number) => {
                         <button
                           type="button"
                           onClick={() => handleDeleteVariantImage(image.id)}
-                          className="absolute -top-2 -right-2 bg-red-600 text-white rounded-full h-5 w-5 text-xs"
+                            className={`absolute -top-2 -right-2 rounded-full h-5 w-5 text-xs ${isMarkedForDelete ? 'bg-gray-600 text-gray-300' : 'bg-red-600 text-white'}`}
+                            title={isMarkedForDelete ? 'Marcada para eliminar' : 'Eliminar'}
                         >
-                          ×
+                            {isMarkedForDelete ? '↩' : '×'}
                         </button>
                       </div>
-                    ))
+                      );
+                    })
                   ) : (
                     <p className="text-gray-500 text-sm">Sin imágenes adicionales</p>
                   )}
@@ -3910,9 +4197,25 @@ const fetchOrderDetails = async (orderId: number) => {
                   type="file"
                   accept="image/*"
                   multiple
-                  className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
-                  onChange={(e) => setEditingVariantGalleryFiles(e.target.files)}
+                  className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-sm"
+                  onChange={async (e) => {
+                    const files = e.target.files;
+                    setEditingVariantGalleryFiles(files);
+                    if (files) {
+                      const previews = await Promise.all(Array.from(files).map(createImagePreview));
+                      setEditingVariantGalleryPreviews(previews);
+                    } else {
+                      setEditingVariantGalleryPreviews([]);
+                    }
+                  }}
                 />
+                {editingVariantGalleryPreviews.length > 0 && (
+                  <div className="flex flex-wrap gap-2 mt-2">
+                    {editingVariantGalleryPreviews.map((preview, idx) => (
+                      <img key={idx} src={preview} alt={`Preview ${idx + 1}`} className="h-20 w-20 object-cover rounded-lg border border-gray-700" />
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
             <div className="flex justify-end space-x-2 mt-6">
@@ -3920,9 +4223,12 @@ const fetchOrderDetails = async (orderId: number) => {
                 onClick={() => {
                   setEditingVariant(null);
                   setEditingVariantImageFile(null);
+                  setEditingVariantImagePreview(null);
                   setEditingVariantGalleryFiles(null);
+                  setEditingVariantGalleryPreviews([]);
+                  setVariantImagesToDelete([]);
                 }}
-                className="px-4 py-2 bg-gray-600 hover:bg-gray-700 rounded"
+                className="px-4 py-2 bg-gray-600 hover:bg-gray-700 rounded text-sm"
               >
                 Cancelar
               </button>
@@ -3933,6 +4239,162 @@ const fetchOrderDetails = async (orderId: number) => {
                 Guardar Cambios
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal para detalles de producto */}
+      {showProductDetails.show && productDetails && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-gray-800 rounded-lg p-6 w-full max-w-4xl max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-xl font-bold text-white">Detalles del Producto #{productDetails.id}</h3>
+              <button
+                onClick={() => setShowProductDetails({ show: false, productId: null })}
+                className="text-gray-400 hover:text-white"
+              >
+                <X className="h-6 w-6" />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="space-y-4">
+                <h4 className="text-lg font-semibold text-white mb-3">Información del Producto</h4>
+                <div className="bg-gray-700 rounded-lg p-4 space-y-2">
+                  <div className="flex justify-between">
+                    <span className="text-gray-300">Nombre:</span>
+                    <span className="text-white font-medium">{productDetails.name}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-300">Precio:</span>
+                    <span className="text-white font-medium">${productDetails.price.toFixed(2)}</span>
+                  </div>
+                  {productDetails.original_price && productDetails.original_price > productDetails.price && (
+                    <div className="flex justify-between">
+                      <span className="text-gray-300">Precio Original:</span>
+                      <span className="text-white font-medium line-through">${productDetails.original_price.toFixed(2)}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between">
+                    <span className="text-gray-300">Categoría:</span>
+                    <span className="text-white font-medium">
+                      {categories.find(c => c.id === productDetails.category_id)?.name || 'Sin categoría'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-300">Material:</span>
+                    <span className="text-white font-medium">{productDetails.material || 'N/A'}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-300">Stock:</span>
+                    <span className="text-white font-medium">{productDetails.stock || 0}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-300">Peso:</span>
+                    <span className="text-white font-medium">{productDetails.weight_grams || 100} g</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-300">Estado:</span>
+                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${productDetails.is_active !== false ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
+                      {productDetails.is_active !== false ? 'Activo' : 'Inactivo'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-300">En Stock:</span>
+                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${productDetails.in_stock ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
+                      {productDetails.in_stock ? 'Sí' : 'No'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-300">Alto Valor:</span>
+                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${productDetails.is_high_value ? 'bg-yellow-500/20 text-yellow-400' : 'bg-gray-500/20 text-gray-400'}`}>
+                      {productDetails.is_high_value ? 'Sí' : 'No'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-300">Envío Especial:</span>
+                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${productDetails.requires_special_shipping ? 'bg-orange-500/20 text-orange-400' : 'bg-gray-500/20 text-gray-400'}`}>
+                      {productDetails.requires_special_shipping ? 'Sí' : 'No'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <h4 className="text-lg font-semibold text-white mb-3">Imagen Principal</h4>
+                <div className="bg-gray-700 rounded-lg p-4">
+                  {productDetails.image && (
+                    isVideoUrl(productDetails.image) ? (
+                      <video src={buildMediaUrl(productDetails.image)} className="w-full h-64 object-cover rounded-lg" controls />
+                    ) : (
+                      <img src={buildMediaUrl(productDetails.image)} alt={productDetails.name} className="w-full h-64 object-cover rounded-lg" />
+                    )
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {productDetails.description && (
+              <div className="mt-6">
+                <h4 className="text-lg font-semibold text-white mb-3">Descripción</h4>
+                <div className="bg-gray-700 rounded-lg p-4">
+                  <p className="text-gray-300">{productDetails.description}</p>
+                </div>
+              </div>
+            )}
+
+            {productDetails.images && productDetails.images.length > 0 && (
+              <div className="mt-6">
+                <h4 className="text-lg font-semibold text-white mb-3">Imágenes Complementarias</h4>
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+                  {productDetails.images.map(image => (
+                    <div key={image.id}>
+                      {isVideoUrl(image.url) ? (
+                        <video src={buildMediaUrl(image.url)} className="w-full h-32 object-cover rounded-lg" muted playsInline />
+                      ) : (
+                        <img src={buildMediaUrl(image.url)} alt={productDetails.name} className="w-full h-32 object-cover rounded-lg" />
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {productDetails.variants && productDetails.variants.length > 0 && (
+              <div className="mt-6">
+                <h4 className="text-lg font-semibold text-white mb-3">Variantes ({productDetails.variants.length})</h4>
+                <div className="bg-gray-700 rounded-lg p-4 space-y-3">
+                  {productDetails.variants.map(variant => (
+                    <div key={variant.id} className="flex items-center justify-between border-b border-gray-600 pb-3 last:border-0">
+                      <div className="flex items-center space-x-3">
+                        {variant.image && (
+                          isVideoUrl(variant.image) ? (
+                            <video src={buildMediaUrl(variant.image)} className="h-16 w-16 rounded object-cover" muted playsInline />
+                          ) : (
+                            <img src={buildMediaUrl(variant.image)} alt={variant.name} className="h-16 w-16 rounded object-cover" />
+                          )
+                        )}
+                        <div>
+                          <div className="font-medium text-white">{variant.name}</div>
+                          {variant.model && <div className="text-sm text-gray-400">Modelo: {variant.model}</div>}
+                          {variant.size && <div className="text-sm text-gray-400">Talla: {variant.size}</div>}
+                          <div className="text-sm text-gray-400">Stock: {variant.stock || 0}</div>
+                          <span className={`inline-block mt-1 px-2 py-0.5 rounded-full text-xs font-medium ${variant.is_active !== false ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
+                            {variant.is_active !== false ? 'Activo' : 'Inactivo'}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <div className="font-semibold text-white">${variant.price.toFixed(2)}</div>
+                        {variant.original_price && variant.original_price > variant.price && (
+                          <div className="text-sm text-gray-400 line-through">${variant.original_price.toFixed(2)}</div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Product } from '../types';
-import { Star, Sparkles } from 'lucide-react';
+import { Sparkles } from 'lucide-react';
 import { buildMediaUrl, isVideoUrl } from '../utils/storage';
 
 interface ProductCardProps {
@@ -11,10 +11,8 @@ interface ProductCardProps {
 const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
   const navigate = useNavigate();
   
-  // Lógica para manejar variantes - mostrar producto principal primero
   const getDefaultModel = () => {
     if (!product.variants || product.variants.length === 0) return '';
-    // Si hay variantes, no seleccionar ninguna por defecto para mostrar el producto principal
     return '';
   };
 
@@ -25,7 +23,6 @@ const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
     setSelectedModel(defModel);
   }, [product.id]);
 
-  // Solo usar variante si está seleccionada, sino usar producto principal
   const selectedVariant = selectedModel ? product.variants?.find(v => v.model === selectedModel) : null;
 
   const formatPrice = (price: number) => {
@@ -44,14 +41,9 @@ const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
   const baseAvailable = product.in_stock !== false && (product.stock ?? 0) > 0;
   const isSoldOut = !(baseAvailable || hasVariantStock);
 
-  // La disponibilidad se maneja en ProductPage
-
   const handleClick = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    
-    // Navegación directa sin condiciones
-    console.log('Navigating to:', `/producto/${product.id}`);
     navigate(`/producto/${product.id}`);
   };
 
@@ -59,20 +51,18 @@ const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
     e.stopPropagation();
   };
 
-
-
   return (
     <div
-      className="group relative bg-gradient-to-br from-gray-800 to-gray-900 rounded-2xl overflow-hidden shadow-2xl hover:shadow-gray-400/20 transition-all duration-500 transform hover:scale-105 h-full flex flex-col cursor-pointer"
+      className="group relative bg-gradient-to-br from-gray-800 to-gray-900 rounded-xl overflow-hidden shadow-lg hover:shadow-gray-400/10 transition-all duration-300 transform hover:scale-[1.02] h-full flex flex-col cursor-pointer"
       onClick={handleClick}
     >
 
-      {/* Imagen o Video */}
-      <div className="relative w-full aspect-[3/4] sm:aspect-[4/5] overflow-hidden">
+      {/* Imagen o Video - dimensiones reducidas */}
+      <div className="relative w-full aspect-[3/4] overflow-hidden">
         {isVideo ? (
           <video
             src={displayImage}
-            className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700"
+            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
             muted
             loop
             playsInline
@@ -82,58 +72,57 @@ const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
           <img
             src={displayImage}
             alt={product.name}
-            className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700"
+            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
           />
         )}
-        <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+        <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
         
-        <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity duration-500">
-          <Sparkles className="h-5 w-5 text-gray-300 animate-pulse" />
+        <div className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+          <Sparkles className="h-3.5 w-3.5 text-gray-300 animate-pulse" />
         </div>
 
         {isSoldOut && (
-          <div className="absolute inset-0 bg-black/70 flex items-center justify-center">
-            <span className="text-white font-bold tracking-widest">AGOTADO</span>
+          <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
+            <span className="text-white text-sm font-medium">AGOTADO</span>
           </div>
         )}
 
-        {/* Badges pequeños en la parte inferior de la imagen */}
-        <div className="absolute bottom-2 left-2 right-2 flex flex-wrap gap-1 justify-start">
+        {/* Badges - manteniendo misma posición */}
+        <div className="absolute bottom-2 left-2 flex flex-wrap gap-1 justify-start">
           {product.is_new && (
-            <span className="bg-green-600 text-white px-2 py-0.5 rounded-full text-[10px] font-bold">NUEVO</span>
+            <span className="bg-green-600 text-white px-1.5 py-0.5 rounded-full text-[9px] font-bold">NUEVO</span>
           )}
           {product.is_featured && (
-            <span className="bg-gray-300 text-black px-2 py-0.5 rounded-full text-[10px] font-bold">DESTACADO</span>
+            <span className="bg-gray-300 text-black px-1.5 py-0.5 rounded-full text-[9px] font-bold">DESTACADO</span>
           )}
           {product.original_price && product.original_price > displayPrice && (
-            <span className="bg-red-600 text-white px-2 py-0.5 rounded-full text-[10px] font-bold">OFERTA</span>
+            <span className="bg-red-600 text-white px-1.5 py-0.5 rounded-full text-[9px] font-bold">OFERTA</span>
           )}
         </div>
       </div>
 
-      {/* Información del producto */}
-      <div className="p-5 sm:p-6 flex-1 flex flex-col">
-        <div className="mb-3">
-          <h3 className="text-base lg:text-lg font-bold text-white mb-1 group-hover:text-gray-300 transition-colors duration-300 line-clamp-2">
+      {/* Información del producto - más compacta */}
+      <div className="p-3 sm:p-4 flex-1 flex flex-col">
+        <div className="mb-2">
+          <h3 className="text-sm lg:text-base font-bold text-white mb-1 group-hover:text-gray-300 transition-colors duration-200 line-clamp-2">
             {product.name}
           </h3>
-          <p className="text-sm lg:text-sm font-medium tracking-wide text-yellow-400">
+          <p className="text-xs lg:text-sm font-medium text-yellow-400">
             {product.material}
           </p>
         </div>
 
-
-        {/* Selector de modelo (solo si hay variantes con modelo) */}
+        {/* Selector de modelo - más compacto */}
         {product.variants && product.variants.some(v => v.model) && (
-          <div className="mb-4">
-            <label className="block text-gray-400 text-xs mb-1">Modelo:</label>
+          <div className="mb-3">
+            <label className="block text-gray-400 text-[10px] mb-1">Modelo:</label>
             <select
-              className="w-full bg-gray-800 text-white rounded p-4 md:p-2 border border-gray-700 text-xs sm:text-sm"
+              className="w-full bg-gray-800 text-white rounded p-2 border border-gray-700 text-xs"
               value={selectedModel}
               onChange={e => setSelectedModel(e.target.value)}
               onClick={handleSelectChange}
             >
-              <option value="">Producto Principal</option>
+              <option value="">Principal</option>
               {[...new Set(product.variants.map(v => v.model).filter(Boolean))].map(model => (
                 <option key={model} value={model}>{model}</option>
               ))}
@@ -141,35 +130,31 @@ const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
           </div>
         )}
 
-        {/* Sección de precios */}
+        {/* Sección de precios - más compacta */}
         <div className="mt-auto">
-          {/* Precio actual y original en línea */}
-          <div className="flex items-baseline gap-3 mb-1">
-            <span className="text-sm sm:text-xl font-bold text-gray-300">
+          <div className="flex items-baseline gap-2 mb-1">
+            <span className="text-base sm:text-lg font-bold text-gray-300">
               {formatPrice(displayPrice)}
             </span>
             {product.original_price && product.original_price > displayPrice && (
-              <span className="text-xs sm:text-lg text-gray-500 line-through">
+              <span className="text-xs sm:text-sm text-gray-500 line-through">
                 {formatPrice(product.original_price)}
               </span>
             )}
           </div>
 
-          {/* Ahorro debajo */}
           {product.original_price && product.original_price > displayPrice && (
-            <div className="mb-2">
-              <span className="text-sm text-green-400 font-medium">
+            <div className="mb-1">
+              <span className="text-xs text-green-400 font-medium">
                 Ahorras: {formatPrice(product.original_price - displayPrice)}
               </span>
             </div>
           )}
-
-          {/* Estado de stock removido: ahora se maneja en ProductPage */}
         </div>
       </div>
 
-      {/* Borde decorativo */}
-      <div className="absolute inset-0 border-2 border-transparent group-hover:border-gray-300/30 rounded-2xl transition-all duration-500 pointer-events-none"></div>
+      {/* Borde decorativo - más sutil */}
+      <div className="absolute inset-0 border border-transparent group-hover:border-gray-300/20 rounded-xl transition-all duration-300 pointer-events-none"></div>
     </div>
   );
 };

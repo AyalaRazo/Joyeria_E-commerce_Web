@@ -1,0 +1,31 @@
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+# Rewrites imágenes Supabase
+[[redirects]]
+  from = "/images/*"
+  to = "https://xrtfrtiubugctntwbami.supabase.co/storage/v1/object/public/products/:splat"
+  status = 200
+
+[[redirects]]
+  from = "/videos/*"
+  to = "https://xrtfrtiubugctntwbami.supabase.co/storage/v1/object/public/products/videos/:splat"
+  status = 200
+
+# SPA fallback (equivalente a "/(.*)" → "/")
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+# Headers (equivalente a vercel headers)
+[[headers]]
+  for = "/images/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+[[headers]]
+  for = "/videos/*"
+  [headers.values]
+    Cache-Control = "public, max-age=86400"

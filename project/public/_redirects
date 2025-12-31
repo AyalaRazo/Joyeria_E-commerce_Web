@@ -1,8 +1,0 @@
-# Proxy para imágenes de Supabase
-/images/*  https://xrtfrtiubugctntwbami.supabase.co/storage/v1/object/public/products/:splat  200
-
-# Proxy para videos de Supabase
-/videos/*  https://xrtfrtiubugctntwbami.supabase.co/storage/v1/object/public/products/videos/:splat  200
-
-# SPA fallback para React Router (DEBE IR AL FINAL)
-/*  /index.html  200

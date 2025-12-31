@@ -11,7 +11,7 @@ const Footer: React.FC = () => {
           <div className="col-span-1 lg:col-span-2">
             <div className="mb-3">
               <h1 className="text-lg font-bold bg-gradient-to-r from-gray-300 via-gray-400 to-gray-500 bg-clip-text text-transparent">
-                Joyeria
+                Joyeria Orlando
               </h1>
             </div>
             <p className="text-gray-300 text-xs leading-relaxed mb-3 max-w-md">

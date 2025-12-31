@@ -18,7 +18,7 @@ const SearchModal: React.FC<SearchModalProps> = ({
   const { products, categories, loading } = useProducts();
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('all');
-  const [priceRange, setPriceRange] = useState({ min: 0, max: 10000 });
+  const [priceRange, setPriceRange] = useState({ min: 0, max: 100000 });
   const [showFilters, setShowFilters] = useState(false);
   const [sortBy, setSortBy] = useState('name');
   const [showOnlyDiscounted, setShowOnlyDiscounted] = useState(false);
@@ -171,7 +171,7 @@ const SearchModal: React.FC<SearchModalProps> = ({
     if (!isOpen) {
       setSearchTerm('');
       setSelectedCategory('all');
-      setPriceRange({ min: 0, max: 10000 });
+      setPriceRange({ min: 0, max: 100000 });
       setShowFilters(false);
       setSortBy('name');
       setShowOnlyDiscounted(false);
@@ -388,7 +388,7 @@ const SearchModal: React.FC<SearchModalProps> = ({
                       <input
                         type="range"
                         min="0"
-                        max="10000"
+                        max="100000"
                         step="100"
                         value={priceRange.min}
                         onChange={(e) => setPriceRange({...priceRange, min: parseInt(e.target.value)})}

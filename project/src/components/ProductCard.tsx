@@ -275,26 +275,29 @@ const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
 
         {/* Sección de precios - más compacta */}
         <div className="mt-auto">
-          <div className="flex items-baseline gap-2 mb-1">
-            <span className="text-base sm:text-lg font-bold text-gray-300">
-              {formatPrice(displayPrice)}
-            </span>
-            {displayOriginalPrice && displayOriginalPrice > displayPrice && (
-              <>
-                <span className="text-xs sm:text-sm text-gray-500 line-through">
+          {displayOriginalPrice && displayOriginalPrice > displayPrice ? (
+            <>
+              <div className="flex items-center gap-1.5 mb-0.5 flex-wrap">
+                <span className="text-base sm:text-lg font-bold text-gray-300">
+                  {formatPrice(displayPrice)}
+                </span>
+                <span className="bg-red-600 text-white px-1.5 py-0.5 rounded text-[10px] font-bold shrink-0">
+                  -{Math.round(((displayOriginalPrice - displayPrice) / displayOriginalPrice) * 100)}%
+                </span>
+              </div>
+              <div className="flex items-center gap-2 mb-1">
+                <span className="text-xs text-gray-500 line-through">
                   {formatPrice(displayOriginalPrice)}
                 </span>
-                <span className="bg-red-600 text-white px-1.5 py-0.5 rounded text-[9px] font-bold">
-                  {Math.round(((displayOriginalPrice - displayPrice) / displayOriginalPrice) * 100)}% OFF
+                <span className="text-xs text-green-400 font-medium">
+                  Ahorras {formatPrice(displayOriginalPrice - displayPrice)}
                 </span>
-              </>
-            )}
-          </div>
-
-          {displayOriginalPrice && displayOriginalPrice > displayPrice && (
-            <div className="mb-1">
-              <span className="text-xs text-green-400 font-medium">
-                Ahorras: {formatPrice(displayOriginalPrice - displayPrice)}
+              </div>
+            </>
+          ) : (
+            <div className="flex items-baseline gap-2 mb-1">
+              <span className="text-base sm:text-lg font-bold text-gray-300">
+                {formatPrice(displayPrice)}
               </span>
             </div>
           )}

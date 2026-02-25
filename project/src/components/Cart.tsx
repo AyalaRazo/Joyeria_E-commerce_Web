@@ -142,7 +142,10 @@ const Cart: React.FC<CartProps> = ({
                             {item.variant && (
                               <p className="text-xs text-yellow-400 font-medium truncate">
                                 {item.variant.model || 'Principal'}
-                                {item.variant.size && ` - ${item.variant.size}`}
+                                {item.variant.size && ` · T${item.variant.size}`}
+                                {(item.variant.metal_name || item.variant.carat) && (
+                                  ` · ${[item.variant.metal_name, item.variant.carat ? `${item.variant.carat}k` : ''].filter(Boolean).join(' ')}`
+                                )}
                               </p>
                             )}
                           </div>

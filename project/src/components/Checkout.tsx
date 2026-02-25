@@ -433,15 +433,10 @@ const Checkout: React.FC<CheckoutProps> = ({
 
      // Validar items del carrito
     const validatedItems = items.map(item => {
-      // Separar el ID compuesto si es necesario
-      const [productId, variantIdStr] = item.id.toString().split('-');
-      const productIdNum = parseInt(productId);
-      const variantId = variantIdStr === 'base' ? null : parseInt(variantIdStr);
-      
       return {
         id: item.id,
-        product_id: productIdNum, // Parte antes del guión
-        variant_id: variantId, // Parte después del guión (si existe)
+        product_id: item.product_id,
+        variant_id: item.variant_id ?? null,
         quantity: item.quantity,
         price: item.price,
         name: item.name,
@@ -1089,7 +1084,15 @@ const Checkout: React.FC<CheckoutProps> = ({
                         const itemImage = variantImage || productImage;
                         const variantModel = (item as any).variant?.model;
                         const variantSize = (item as any).variant?.size;
-                        
+                        const variantMetal = (item as any).variant?.metal_name;
+                        const variantCarat = (item as any).variant?.carat;
+                        const variantDetails = [
+                          variantModel || 'Principal',
+                          variantSize ? `T${variantSize}` : '',
+                          variantMetal || '',
+                          variantCarat ? `${variantCarat}k` : ''
+                        ].filter(Boolean).join(' · ');
+
                         return (
                         <div key={item.id} className="flex space-x-2">
                           <img
@@ -1100,10 +1103,9 @@ const Checkout: React.FC<CheckoutProps> = ({
                           <div className="flex-1 min-w-0">
                             <h4 className="text-xs font-medium text-white line-clamp-2">
                               {item.name}
-                              {(variantModel || variantSize) && (
+                              {variantDetails && (
                                 <span className="block text-xs text-yellow-400 font-medium">
-                                  {variantModel || 'Principal'}
-                                  {variantSize && ` - ${variantSize}`}
+                                  {variantDetails}
                                 </span>
                               )}
                             </h4>

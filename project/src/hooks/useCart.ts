@@ -41,7 +41,10 @@ export const useCart = () => {
       model: item.variant.model,
       size: item.variant.size,
       stock: item.variant.stock,
-      original_price: item.variant.original_price
+      original_price: item.variant.original_price,
+      metal_type: item.variant.metal_type,
+      carat: item.variant.carat,
+      metal_name: (item.variant as any).metal_name
     } : undefined
   });
 
@@ -175,12 +178,15 @@ export const useCart = () => {
               product_id: variant.product_id,
               name: variant.name,
               price: variant.price,
-              image: variant.use_product_images ? product.image : (variant.image || product.image), // Usar imagen según use_product_images
+              image: variant.use_product_images ? product.image : (variant.image || product.image),
               model: variant.model,
               size: variant.size,
               stock: variant.stock,
               original_price: variant.original_price,
-              use_product_images: variant.use_product_images
+              use_product_images: variant.use_product_images,
+              metal_type: variant.metal_type,
+              carat: variant.carat,
+              metal_name: (variant as any).metal_type_info?.name
             } : undefined
           });
         }
@@ -245,12 +251,15 @@ export const useCart = () => {
             product_id: variant.product_id,
             name: variant.name,
             price: variant.price,
-            image: variant.use_product_images ? product.image : (variant.image || product.image), // Usar imagen según use_product_images
+            image: variant.use_product_images ? product.image : (variant.image || product.image),
             model: variant.model,
             size: variant.size,
             stock: variant.stock,
             original_price: variant.original_price,
-            use_product_images: variant.use_product_images
+            use_product_images: variant.use_product_images,
+            metal_type: variant.metal_type,
+            carat: variant.carat,
+            metal_name: (variant as any).metal_type_info?.name
           } : undefined
         };
         currentItems.unshift(newItem);

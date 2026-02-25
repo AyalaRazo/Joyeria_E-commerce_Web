@@ -66,7 +66,8 @@ export interface ProductVariant {
   image_reference_variant_id?: number | null;
   metal_type?: number;
   carat?: number;
-  variant_images?: VariantImage[]; 
+  metal_name?: string;
+  variant_images?: VariantImage[];
   images?: VariantImage[];
 }
 

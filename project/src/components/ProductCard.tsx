@@ -153,6 +153,8 @@ const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
     ? product.variants.some(variant => variant.is_active !== false && (variant.stock ?? 0) > 0)
     : false;
   const isSoldOut = !hasVariantStock;
+  // La variante seleccionada en particular está agotada (pero hay otras disponibles)
+  const selectedVariantSoldOut = !isSoldOut && selectedVariant != null && (selectedVariant.stock ?? 0) <= 0;
 
   const handleClick = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -199,6 +201,13 @@ const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
             <span className="text-white text-sm font-medium">AGOTADO</span>
           </div>
         )}
+        {selectedVariantSoldOut && (
+          <div className="absolute top-2 left-2">
+            <span className="bg-orange-500/90 text-white text-[9px] font-bold px-2 py-0.5 rounded-full">
+              ESTE MODELO AGOTADO
+            </span>
+          </div>
+        )}
 
         {/* Badges - manteniendo misma posición */}
         <div className="absolute bottom-2 left-2 flex flex-wrap gap-1 justify-start">
@@ -225,24 +234,42 @@ const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
           </p>
         </div>
 
-        {/* Selector de modelo - más compacto - solo mostrar si hay modelos además del default */}
+        {/* Selector de modelo — botones horizontales */}
         {availableModels.length > 0 && (
           <div className="mb-3">
-            <label className="block text-gray-400 text-[10px] mb-1">Modelo:</label>
-            <select
-              className="w-full bg-gray-800 text-white rounded p-2 border border-gray-700 text-xs"
-              value={selectedModel}
-              onChange={e => setSelectedModel(e.target.value)}
+            <p className="text-[9px] font-semibold uppercase tracking-widest text-gray-500 mb-1.5">Modelo</p>
+            <div
+              className="flex gap-1.5 overflow-x-auto pb-0.5"
+              style={{ scrollbarWidth: 'none' }}
               onClick={handleSelectChange}
             >
-              <option value="">{defaultVariant ? getModelDisplayName(defaultVariant.model, true) : 'Seleccionar'}</option>
+              <button
+                onClick={e => { e.stopPropagation(); setSelectedModel(''); }}
+                className={`flex-shrink-0 px-3 py-1 rounded-full text-[10px] font-semibold border transition-all duration-150 whitespace-nowrap ${
+                  selectedModel === ''
+                    ? 'bg-yellow-400 text-black border-yellow-400'
+                    : 'bg-transparent text-gray-400 border-gray-700 hover:border-gray-500 hover:text-white'
+                }`}
+              >
+                {defaultVariant ? getModelDisplayName(defaultVariant.model, true) : 'Principal'}
+              </button>
               {availableModels.map((modelData) => {
                 const displayName = getModelDisplayName(modelData.model, false, modelData.index);
                 return (
-                  <option key={modelData.model || `model-${modelData.index}`} value={modelData.model}>{displayName}</option>
+                  <button
+                    key={modelData.model || `model-${modelData.index}`}
+                    onClick={e => { e.stopPropagation(); setSelectedModel(modelData.model); }}
+                    className={`flex-shrink-0 px-3 py-1 rounded-full text-[10px] font-semibold border transition-all duration-150 whitespace-nowrap ${
+                      selectedModel === modelData.model
+                        ? 'bg-yellow-400 text-black border-yellow-400'
+                        : 'bg-transparent text-gray-400 border-gray-700 hover:border-gray-500 hover:text-white'
+                    }`}
+                  >
+                    {displayName}
+                  </button>
                 );
               })}
-            </select>
+            </div>
           </div>
         )}
 

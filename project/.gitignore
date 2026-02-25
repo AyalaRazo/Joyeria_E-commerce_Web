@@ -34,3 +34,4 @@ dist-ssr/
 # Supabase (SOLO configs sensibles, NO todo)
 supabase/
 .claude/
+testsprite_tests/

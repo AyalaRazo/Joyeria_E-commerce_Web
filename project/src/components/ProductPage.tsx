@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Star, ArrowLeft, Heart, X, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Star, ArrowLeft, Heart, X, ChevronLeft, ChevronRight, Truck, Shield, RotateCcw, ShoppingCart, Package, MapPin, ZoomIn, Lock, CreditCard } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { useCart } from '../hooks/useCart';
 import { supabase } from '../lib/supabase';
@@ -714,20 +714,51 @@ const ProductPage: React.FC = () => {
       <div className="max-w-6xl mx-auto px-3 sm:px-5 lg:px-6 py-6">
         <div className="flex flex-col md:flex-row gap-6">
           {/* Galería de imágenes - más compacta */}
-          <div className="w-full flex flex-col items-center md:flex-row md:items-start gap-3">
+          {/* Galería — thumbnails izquierda en desktop, abajo en móvil */}
+          <div className="w-full flex flex-col md:flex-row md:items-start gap-3">
+            {/* Imagen principal */}
+            <div className="flex-1 order-1 md:order-2">
+              <div
+                className="group relative w-full h-[28rem] sm:h-[34rem] flex items-center justify-center rounded-2xl border border-gray-800 bg-black cursor-pointer overflow-hidden"
+                onClick={handleImageClick}
+              >
+                {currentImageIsVideo ? (
+                  <video
+                    src={currentImage}
+                    className="w-full h-full object-contain"
+                    controls
+                    playsInline
+                  />
+                ) : (
+                  <>
+                    <img
+                      src={currentImage}
+                      alt={product.name}
+                      className="w-full h-full object-contain transition-transform duration-300 group-hover:scale-[1.02]"
+                    />
+                    <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors duration-300 flex items-center justify-center">
+                      <div className="opacity-0 group-hover:opacity-100 transition-opacity duration-300 bg-black/60 rounded-full p-3">
+                        <ZoomIn className="w-5 h-5 text-white" />
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+            {/* Thumbnails — fila horizontal en móvil, columna vertical en desktop */}
             {allImages.length > 1 && (
-              <div className="md:min-w-[4rem] flex md:flex-col gap-1.5 md:mr-3 mb-1.5 md:mb-0 overflow-x-auto md:overflow-y-auto md:max-h-64 max-w-full scrollbar-thin scrollbar-thumb-gray-700 scrollbar-track-gray-900">
+              <div className="flex md:hidden order-2 flex-row gap-2 overflow-x-auto pb-1 scrollbar-thin scrollbar-thumb-gray-700 scrollbar-track-transparent">
                 {allImages.map((img, idx) => {
                   const isVideo = isVideoUrl(img);
+                  const isActive = idx === currentImageIndex;
                   return (
                     <button
-                      key={`${img}-${idx}`}
+                      key={`mob-${img}-${idx}`}
                       onClick={() => setCurrentImageIndex(idx)}
-                      onMouseEnter={() => setCurrentImageIndex(idx)}
-                      className={`border rounded-md overflow-hidden w-14 h-14 flex-shrink-0 flex items-center justify-center transition-all duration-150 ${
-                        idx === currentImageIndex
-                          ? 'border-yellow-400' 
-                          : 'border-gray-700'
+                      className={`relative flex-shrink-0 w-14 h-14 rounded-xl overflow-hidden border-2 transition-all duration-150 ${
+                        isActive
+                          ? 'border-yellow-400 shadow-md shadow-yellow-400/30'
+                          : 'border-gray-800'
                       }`}
                       style={{ background: '#111' }}
                     >
@@ -741,30 +772,62 @@ const ProductPage: React.FC = () => {
                 })}
               </div>
             )}
-            <div 
-              className="w-full max-w-sm h-[24rem] flex items-center justify-center rounded-xl shadow-lg border border-gray-800 bg-black mb-4 p-3 cursor-pointer"
-              onClick={handleImageClick}
-            >
-              {currentImageIsVideo ? (
-                <video
-                  src={currentImage}
-                  className="w-full h-full object-contain rounded-lg"
-                  controls
-                  playsInline
-                />
-              ) : (
-                <img
-                  src={currentImage}
-                  alt={product.name}
-                  className="w-full h-full object-contain rounded-lg"
-                />
-              )}
-            </div>
+            {/* Thumbnails — columna vertical en desktop */}
+            {allImages.length > 1 && (
+              <div className="hidden md:flex order-1 flex-col gap-2 w-16 flex-shrink-0 max-h-[34rem] overflow-y-auto scrollbar-thin scrollbar-thumb-gray-700 scrollbar-track-transparent">
+                {allImages.map((img, idx) => {
+                  const isVideo = isVideoUrl(img);
+                  const isActive = idx === currentImageIndex;
+                  return (
+                    <button
+                      key={`${img}-${idx}`}
+                      onClick={() => setCurrentImageIndex(idx)}
+                      onMouseEnter={() => setCurrentImageIndex(idx)}
+                      className={`relative flex-shrink-0 w-16 h-16 rounded-xl overflow-hidden border-2 transition-all duration-150 ${
+                        isActive
+                          ? 'border-yellow-400 shadow-md shadow-yellow-400/30'
+                          : 'border-gray-800 hover:border-gray-600'
+                      }`}
+                      style={{ background: '#111' }}
+                    >
+                      {isVideo ? (
+                        <video src={img} className="object-contain w-full h-full" muted playsInline loop controls={false} />
+                      ) : (
+                        <img src={img} alt={`Vista ${idx + 1}`} className="object-contain w-full h-full" />
+                      )}
+                      {isActive && (
+                        <div className="absolute inset-0 ring-1 ring-yellow-400/40 rounded-xl pointer-events-none" />
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
           
           {/* Información del producto - más compacta */}
           <div className="w-full flex flex-col justify-center">
-            <h1 className="text-3xl sm:text-4xl font-bold text-white mb-3 leading-snug">{product.name}</h1>
+            <h1 className="text-3xl sm:text-4xl font-bold text-white mb-2 leading-snug">{product.name}</h1>
+            {/* Promedio de reseñas */}
+            {reviews.length > 0 && (() => {
+              const avg = reviews.reduce((s, r) => s + r.rating, 0) / reviews.length;
+              return (
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="flex gap-0.5">
+                    {[1, 2, 3, 4, 5].map(i => (
+                      <Star
+                        key={i}
+                        size={14}
+                        fill={i <= Math.round(avg) ? 'currentColor' : 'none'}
+                        className={i <= Math.round(avg) ? 'text-yellow-400' : 'text-gray-700'}
+                      />
+                    ))}
+                  </div>
+                  <span className="text-yellow-400 text-sm font-semibold">{avg.toFixed(1)}</span>
+                  <span className="text-gray-500 text-sm">({reviews.length} {reviews.length === 1 ? 'reseña' : 'reseñas'})</span>
+                </div>
+              );
+            })()}
             <p className="text-base text-yellow-400 font-medium mb-1.5">{product.material}</p>
             <p className="text-gray-300 text-base mb-4 leading-relaxed">{product.description}</p>
             
@@ -785,396 +848,587 @@ const ProductPage: React.FC = () => {
               )}
             </div>
 
-            {/* Widgets de optimización - más compactos */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
-              <div className="bg-gradient-to-r from-green-900/20 to-green-800/20 border border-green-500/20 rounded-md p-3 text-center">
-                <div className="text-green-400 text-xl mb-1">🚚</div>
-                <h4 className="text-green-300 font-medium text-xs mb-0.5">Envío Gratis</h4>
-                <p className="text-green-200 text-[10px]">Desde $5,000</p>
+            {/* Widgets de beneficios — barra unificada */}
+            <div className="bg-gray-900/40 border border-gray-800 rounded-2xl divide-y divide-gray-800 mb-4 overflow-hidden">
+              <div className="flex items-center gap-3 px-4 py-3">
+                <div className="w-8 h-8 rounded-full bg-yellow-400/10 flex items-center justify-center flex-shrink-0">
+                  <Truck className="w-4 h-4 text-yellow-400" />
+                </div>
+                <div>
+                  <p className="text-white text-xs font-semibold">Envío gratis</p>
+                  <p className="text-gray-500 text-[10px]">En compras desde $5,000 MXN</p>
+                </div>
               </div>
-
               {product.has_warranty && (
-                <div className="bg-gradient-to-r from-blue-900/20 to-blue-800/20 border border-blue-500/20 rounded-md p-3 text-center">
-                  <div className="text-blue-400 text-xl mb-1">🛡️</div>
-                  <h4 className="text-blue-300 font-medium text-xs mb-0.5">Garantía</h4>
-                  <p className="text-blue-200 text-[10px]">
-                    {product.warranty_unit === 'lifetime'
-                      ? 'De por vida'
-                      : `${product.warranty_period} ${product.warranty_unit}`}
-                  </p>
+                <div className="flex items-center gap-3 px-4 py-3">
+                  <div className="w-8 h-8 rounded-full bg-yellow-400/10 flex items-center justify-center flex-shrink-0">
+                    <Shield className="w-4 h-4 text-yellow-400" />
+                  </div>
+                  <div>
+                    <p className="text-white text-xs font-semibold">Garantía incluida</p>
+                    <p className="text-gray-500 text-[10px]">
+                      {product.warranty_unit === 'lifetime'
+                        ? 'De por vida'
+                        : `${product.warranty_period} ${product.warranty_unit}`}
+                    </p>
+                  </div>
                 </div>
               )}
-
-              <div className="bg-gradient-to-r from-purple-900/20 to-purple-800/20 border border-purple-500/20 rounded-md p-3 text-center">
-                <div className="text-purple-400 text-xl mb-1">🔙</div>
-                <h4 className="text-purple-300 font-medium text-xs mb-0.5">Devoluciones</h4>
-                <p className="text-purple-200 text-[10px]">Hasta 1 mes</p>
+              <div className="flex items-center gap-3 px-4 py-3">
+                <div className="w-8 h-8 rounded-full bg-yellow-400/10 flex items-center justify-center flex-shrink-0">
+                  <RotateCcw className="w-4 h-4 text-yellow-400" />
+                </div>
+                <div>
+                  <p className="text-white text-xs font-semibold">Devoluciones</p>
+                  <p className="text-gray-500 text-[10px]">Hasta 30 días desde tu compra</p>
+                </div>
               </div>
             </div>
 
-            {/* Widget de entrega - más compacto */}
-            <div className="mb-4 bg-gray-800/30 border border-gray-700 rounded-md p-3">
-              <div className="space-y-2">
-                {shippingTimeline.map((step, index) => (
-                  <div key={step.title} className="flex items-start space-x-2">
-                    <div className="h-6 w-6 rounded-full bg-yellow-500/10 text-yellow-400 flex items-center justify-center font-bold text-xs border border-yellow-500/40">
-                      {index + 1}
+            {/* Widget de entrega — timeline */}
+            <div className="mb-4 bg-gray-900/40 border border-gray-800 rounded-2xl p-4">
+              <p className="text-[10px] font-semibold uppercase tracking-widest text-gray-500 mb-3">Estimación de entrega</p>
+              <div className="space-y-0">
+                {[
+                  { icon: ShoppingCart, title: 'Cómpralo ahora', detail: 'Confirma tu pedido hoy para asegurar disponibilidad', highlight: false },
+                  { icon: Package, title: `Se envía ${shipDate}`, detail: 'Preparamos y despachamos tu joya antes de las 2 p.m.', highlight: false },
+                  { icon: MapPin, title: `Llega entre ${range}`, detail: 'Ventana estimada con envío asegurado', highlight: true },
+                ].map((step, index, arr) => (
+                  <div key={step.title} className="flex gap-3">
+                    <div className="flex flex-col items-center">
+                      <div className={`w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 ${step.highlight ? 'bg-yellow-400/20 border border-yellow-400/40' : 'bg-gray-800 border border-gray-700'}`}>
+                        <step.icon className={`w-3.5 h-3.5 ${step.highlight ? 'text-yellow-400' : 'text-gray-500'}`} />
+                      </div>
+                      {index < arr.length - 1 && (
+                        <div className="w-px flex-1 border-l border-dashed border-gray-800 my-1" />
+                      )}
                     </div>
-                    <div>
-                      <p className="text-white text-xs font-medium">{step.title}</p>
-                      <p className="text-gray-300 text-[10px]">{step.detail}</p>
+                    <div className={`pb-3 ${index < arr.length - 1 ? '' : ''}`}>
+                      <p className={`text-xs font-semibold ${step.highlight ? 'text-yellow-400' : 'text-white'}`}>{step.title}</p>
+                      <p className="text-gray-500 text-[10px] mt-0.5">{step.detail}</p>
                     </div>
                   </div>
                 ))}
               </div>
             </div>
             
-            {/* Selector de variantes - más compacto */}
+            {/* Selectores de variantes — botones horizontales */}
             {product.variants && product.variants.length > 0 && (() => {
-              // Obtener modelos únicos (incluyendo default si tiene nombre)
-              const defaultVariantWithModel = product.variants.find((v: ProductVariant) => 
+              const defaultVariantWithModel = product.variants.find((v: ProductVariant) =>
                 v.is_default === true && v.model && v.is_active !== false
               );
               const availableModels = [...new Set(product.variants
                 .filter((v: ProductVariant) => v.is_active !== false && v.model)
                 .map((v: ProductVariant) => v.model)
                 .filter(Boolean))];
-              
-              // Determinar si hay variantes default con tallas
-              const defaultVariants = product.variants.filter((v: ProductVariant) => 
+
+              const defaultVariants = product.variants.filter((v: ProductVariant) =>
                 v.is_default === true && v.is_active !== false
               );
               const hasDefaultSizes = defaultVariants.some((v: ProductVariant) => v.size);
-              
-              // Si no hay modelos y no hay tallas en default, no mostrar selectores
+
               if (availableModels.length === 0 && !hasDefaultSizes) return null;
-              
+
+              // Variantes del modelo actualmente seleccionado
+              const currentModel = selectedModel || '';
+              const variantsForModel = product.variants.filter((v: ProductVariant) => {
+                if (currentModel === '') return v.is_default === true && v.is_active !== false;
+                return v.model === currentModel && v.is_active !== false;
+              });
+
+              const availableSizes = [...new Set(variantsForModel
+                .map((v: ProductVariant) => v.size)
+                .filter((s): s is string => s !== undefined && s !== null))];
+
+              // Variantes filtradas por modelo + talla para el selector de kilataje
+              const currentSize = selectedSize || '';
+              const variantsForSelection = product.variants.filter((v: ProductVariant) => {
+                if (currentModel === '') {
+                  const ok = v.is_default === true && v.is_active !== false;
+                  return currentSize ? ok && v.size === currentSize : ok;
+                }
+                const ok = v.model === currentModel && v.is_active !== false;
+                return currentSize ? ok && v.size === currentSize : ok;
+              });
+
+              const uniqueMetalCarat = Array.from(
+                new Map(
+                  variantsForSelection
+                    .filter((v: ProductVariant) => v.metal_type != null || (v.carat != null && v.carat > 0))
+                    .map((v: ProductVariant) => [
+                      `${v.metal_type ?? 'n'}_${v.carat ?? 0}`,
+                      { metal_type: v.metal_type ?? null, carat: v.carat ?? null, variant: v }
+                    ])
+                ).values()
+              );
+
+              const getMetalLabel = (item: { metal_type: number | null; carat: number | null; variant: ProductVariant }) => {
+                const name = (item.variant as any)?.metal_type_info?.name || (item.metal_type != null ? `Metal ${item.metal_type}` : '');
+                const caratStr = item.carat != null && item.carat > 0 ? ` ${item.carat}k` : '';
+                return (name + caratStr).trim() || 'Kilataje';
+              };
+
+              const selectedMetalKey = selectedMetalType != null || selectedCarat != null
+                ? `${selectedMetalType ?? 'n'}_${selectedCarat ?? 0}`
+                : '';
+
               return (
-                <div className="w-full mb-4 space-y-3">
+                <div className="w-full mb-4 space-y-4">
                   {/* Selector de Modelo */}
                   {(availableModels.length > 0 || defaultVariantWithModel) && (
                     <div>
-                      <label className="block text-gray-300 text-xs font-medium mb-1.5">Modelo:</label>
-                      <select
-                        className="w-full bg-gray-900 text-white rounded-md p-2 border border-gray-700 focus:ring-1 focus:ring-yellow-400 text-sm font-medium shadow-sm transition-all duration-150"
-                        value={selectedModel}
-                        onChange={e => {
-                          setSelectedModel(e.target.value);
-                          // Resetear talla y metal_type al cambiar modelo
-                          const sizes = product.variants
-                            ?.filter((v: ProductVariant) => {
-                              if (e.target.value === '') {
-                                return v.is_default === true && v.is_active !== false;
-                              }
-                              return v.model === e.target.value && v.is_active !== false;
-                            })
-                            .map((v: ProductVariant) => v.size)
-                            .filter(Boolean) || [];
-                          setSelectedSize(sizes[0] || '');
-                          
-                          setSelectedMetalType(null);
-                          setSelectedCarat(null);
-                        }}
-                      >
-                        <option value="">
+                      <p className="text-[10px] font-semibold uppercase tracking-widest text-gray-500 mb-2">Modelo</p>
+                      <div className="flex gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: 'none' }}>
+                        <button
+                          onClick={() => {
+                            setSelectedModel('');
+                            const vars = product.variants
+                              ?.filter((v: ProductVariant) => v.is_default === true && v.is_active !== false) || [];
+                            const sizes = vars.map((v: ProductVariant) => v.size).filter(Boolean);
+                            const firstSize = sizes[0] || '';
+                            setSelectedSize(firstSize);
+                            const sizeVars = firstSize ? vars.filter((v: ProductVariant) => v.size === firstSize) : vars;
+                            const firstMetal = sizeVars.find((v: ProductVariant) => v.metal_type != null || (v.carat != null && v.carat > 0));
+                            setSelectedMetalType(firstMetal?.metal_type ?? null);
+                            setSelectedCarat(firstMetal?.carat ?? null);
+                          }}
+                          className={`flex-shrink-0 px-4 py-1.5 rounded-full text-xs font-semibold border transition-all duration-150 whitespace-nowrap ${
+                            selectedModel === ''
+                              ? 'bg-yellow-400 text-black border-yellow-400 shadow-md shadow-yellow-400/20'
+                              : 'bg-transparent text-gray-300 border-gray-700 hover:border-gray-500 hover:text-white'
+                          }`}
+                        >
                           {defaultVariantWithModel ? defaultVariantWithModel.model : 'Principal'}
-                        </option>
+                        </button>
                         {availableModels
                           .filter((m): m is string => m !== undefined && m !== null && m !== defaultVariantWithModel?.model)
                           .map((model: string) => (
-                            <option key={model} value={model}>{model}</option>
+                            <button
+                              key={model}
+                              onClick={() => {
+                                setSelectedModel(model);
+                                const vars = product.variants
+                                  ?.filter((v: ProductVariant) => v.model === model && v.is_active !== false) || [];
+                                const sizes = vars.map((v: ProductVariant) => v.size).filter(Boolean);
+                                const firstSize = sizes[0] || '';
+                                setSelectedSize(firstSize);
+                                const sizeVars = firstSize ? vars.filter((v: ProductVariant) => v.size === firstSize) : vars;
+                                const firstMetal = sizeVars.find((v: ProductVariant) => v.metal_type != null || (v.carat != null && v.carat > 0));
+                                setSelectedMetalType(firstMetal?.metal_type ?? null);
+                                setSelectedCarat(firstMetal?.carat ?? null);
+                              }}
+                              className={`flex-shrink-0 px-4 py-1.5 rounded-full text-xs font-semibold border transition-all duration-150 whitespace-nowrap ${
+                                selectedModel === model
+                                  ? 'bg-yellow-400 text-black border-yellow-400 shadow-md shadow-yellow-400/20'
+                                  : 'bg-transparent text-gray-300 border-gray-700 hover:border-gray-500 hover:text-white'
+                              }`}
+                            >
+                              {model}
+                            </button>
                           ))}
-                      </select>
+                      </div>
                     </div>
                   )}
-                  
-                  {/* Selector de Talla - mostrar si hay tallas para el modelo seleccionado o default */}
-                  {(() => {
-                    const currentModel = selectedModel || '';
-                    const variantsForModel = product.variants.filter((v: ProductVariant) => {
-                      if (currentModel === '') {
-                        return v.is_default === true && v.is_active !== false;
-                      }
-                      return v.model === currentModel && v.is_active !== false;
-                    });
-                    
-                    const availableSizes = [...new Set(variantsForModel
-                      .map((v: ProductVariant) => v.size)
-                      .filter((s): s is string => s !== undefined && s !== null))];
-                    
-                    if (availableSizes.length === 0) return null;
-                    
-                    return (
-                      <div>
-                        <label className="block text-gray-300 text-xs font-medium mb-1.5">Talla:</label>
-                        <select
-                          className="w-full bg-gray-900 text-white rounded-md p-2 border border-gray-700 focus:ring-1 focus:ring-yellow-400 text-sm font-medium shadow-sm transition-all duration-150"
-                          value={selectedSize}
-                          onChange={e => {
-                            setSelectedSize(e.target.value);
-                            const variantForSize = variantsForModel.find((v: ProductVariant) => v.size === e.target.value);
-                            if (variantForSize) {
-                              setSelectedMetalType(variantForSize.metal_type ?? null);
-                              setSelectedCarat(variantForSize.carat ?? null);
-                            } else {
-                              setSelectedMetalType(null);
-                              setSelectedCarat(null);
-                            }
-                          }}
-                        >
-                          {availableSizes.map((size: string) => (
-                            <option key={size} value={size}>{size}</option>
-                          ))}
-                        </select>
+
+                  {/* Selector de Talla */}
+                  {availableSizes.length > 0 && (
+                    <div>
+                      <p className="text-[10px] font-semibold uppercase tracking-widest text-gray-500 mb-2">
+                        Talla{selectedSize && <span className="text-yellow-400 ml-1.5 font-bold normal-case">{selectedSize}</span>}
+                      </p>
+                      <div className="flex gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: 'none' }}>
+                        {availableSizes.map((size: string) => {
+                          const hasStock = variantsForModel.some((v: ProductVariant) => v.size === size && (v.stock ?? 0) > 0);
+                          const isSelected = selectedSize === size;
+                          return (
+                            <button
+                              key={size}
+                              onClick={() => {
+                                if (!hasStock) return;
+                                setSelectedSize(size);
+                                const variantForSize = variantsForModel.find((v: ProductVariant) => v.size === size);
+                                if (variantForSize) {
+                                  setSelectedMetalType(variantForSize.metal_type ?? null);
+                                  setSelectedCarat(variantForSize.carat ?? null);
+                                } else {
+                                  setSelectedMetalType(null);
+                                  setSelectedCarat(null);
+                                }
+                              }}
+                              title={!hasStock ? 'Agotado' : undefined}
+                              className={`relative flex-shrink-0 min-w-[2.5rem] h-10 px-2 rounded-lg text-xs font-bold border transition-all duration-150 ${
+                                isSelected
+                                  ? 'bg-yellow-400 text-black border-yellow-400 shadow-md shadow-yellow-400/20'
+                                  : hasStock
+                                    ? 'bg-transparent text-gray-300 border-gray-700 hover:border-gray-500 hover:text-white'
+                                    : 'bg-transparent text-gray-600 border-gray-800 cursor-not-allowed'
+                              }`}
+                            >
+                              {size}
+                              {!hasStock && (
+                                <span className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                                  <span className="block w-full border-t border-gray-600 absolute" style={{ transform: 'rotate(-20deg)' }} />
+                                </span>
+                              )}
+                            </button>
+                          );
+                        })}
                       </div>
-                    );
-                  })()}
-                  
-                  {/* Selector Kilataje: metal_type + carat (mismo modelo y talla, distintos quilates) */}
-                  {(() => {
-                    const currentModel = selectedModel || '';
-                    const currentSize = selectedSize || '';
-                    const variantsForSelection = product.variants.filter((v: ProductVariant) => {
-                      if (currentModel === '') {
-                        const ok = v.is_default === true && v.is_active !== false;
-                        return currentSize ? ok && v.size === currentSize : ok;
-                      }
-                      const ok = v.model === currentModel && v.is_active !== false;
-                      return currentSize ? ok && v.size === currentSize : ok;
-                    });
-                    const uniqueMetalCarat = Array.from(
-                      new Map(
-                        variantsForSelection
-                          .filter((v: ProductVariant) => v.metal_type != null || (v.carat != null && v.carat > 0))
-                          .map((v: ProductVariant) => [
-                            `${v.metal_type ?? 'n'}_${v.carat ?? 0}`,
-                            { metal_type: v.metal_type ?? null, carat: v.carat ?? null, variant: v }
-                          ])
-                      ).values()
-                    );
-                    if (uniqueMetalCarat.length === 0) return null;
-                    const getOptionLabel = (item: { metal_type: number | null; carat: number | null; variant: ProductVariant }) => {
-                      const name = (item.variant as any)?.metal_type_info?.name || (item.metal_type != null ? `Metal ${item.metal_type}` : '');
-                      const caratStr = item.carat != null && item.carat > 0 ? ` ${item.carat}k` : '';
-                      return (name + caratStr).trim() || 'Kilataje';
-                    };
-                    return (
-                      <div>
-                        <label className="block text-gray-300 text-xs font-medium mb-1.5">Kilataje:</label>
-                        <select
-                          className="w-full bg-gray-900 text-white rounded-md p-2 border border-gray-700 focus:ring-1 focus:ring-yellow-400 text-sm font-medium shadow-sm transition-all duration-150"
-                          value={selectedMetalType != null || selectedCarat != null ? `${selectedMetalType ?? 'n'}_${selectedCarat ?? 0}` : ''}
-                          onChange={e => {
-                            const val = e.target.value;
-                            if (!val) {
-                              setSelectedMetalType(null);
-                              setSelectedCarat(null);
-                              return;
-                            }
-                            const item = uniqueMetalCarat.find(
-                              x => `${x.metal_type ?? 'n'}_${x.carat ?? 0}` === val
-                            );
-                            if (item) {
-                              setSelectedMetalType(item.metal_type);
-                              setSelectedCarat(item.carat);
-                            }
-                          }}
-                        >
-                          {uniqueMetalCarat.map((item) => {
-                            const key = `${item.metal_type ?? 'n'}_${item.carat ?? 0}`;
-                            return (
-                              <option key={key} value={key}>
-                                {getOptionLabel(item)}
-                              </option>
-                            );
-                          })}
-                        </select>
+                    </div>
+                  )}
+
+                  {/* Selector de Kilataje */}
+                  {uniqueMetalCarat.length > 0 && (
+                    <div>
+                      <p className="text-[10px] font-semibold uppercase tracking-widest text-gray-500 mb-2">Kilataje</p>
+                      <div className="flex gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: 'none' }}>
+                        {uniqueMetalCarat.map((item) => {
+                          const key = `${item.metal_type ?? 'n'}_${item.carat ?? 0}`;
+                          const isSelected = selectedMetalKey === key;
+                          const hasStock = (item.variant.stock ?? 0) > 0;
+                          return (
+                            <button
+                              key={key}
+                              onClick={() => {
+                                if (!hasStock) return;
+                                setSelectedMetalType(item.metal_type);
+                                setSelectedCarat(item.carat);
+                              }}
+                              title={!hasStock ? 'Agotado' : undefined}
+                              className={`flex-shrink-0 px-4 py-1.5 rounded-full text-xs font-semibold border transition-all duration-150 whitespace-nowrap ${
+                                isSelected
+                                  ? 'bg-yellow-400 text-black border-yellow-400 shadow-md shadow-yellow-400/20'
+                                  : hasStock
+                                    ? 'bg-transparent text-gray-300 border-gray-700 hover:border-gray-500 hover:text-white'
+                                    : 'bg-transparent text-gray-600 border-gray-800 cursor-not-allowed line-through'
+                              }`}
+                            >
+                              {getMetalLabel(item)}
+                            </button>
+                          );
+                        })}
                       </div>
-                    );
-                  })()}
+                    </div>
+                  )}
                 </div>
               );
             })()}
             
-            {/* Cantidad y botón agregar - más compacto */}
-            <div className="space-y-4">
-              <div>
-                <label className="block text-xs font-medium text-gray-300 mb-2">Cantidad</label>
-                <div className="flex items-center space-x-3">
+            {/* Cantidad + CTA */}
+            <div className="space-y-3">
+              {/* Fila: selector cantidad + indicador de stock */}
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1">
                   <button
                     onClick={() => setQuantity(Math.max(1, quantity - 1))}
-                    className="w-10 h-10 bg-gray-700 hover:bg-gray-600 rounded-md flex items-center justify-center text-white text-lg font-bold"
+                    className="w-9 h-9 rounded-full border border-gray-700 hover:border-gray-500 flex items-center justify-center text-white text-lg font-bold transition-colors"
                   >
-                    -
+                    −
                   </button>
-                  <span className="text-xl font-bold text-white w-12 text-center">
+                  <span className="text-xl font-bold text-white w-10 text-center tabular-nums">
                     {quantity}
                   </span>
                   <button
                     onClick={() => setQuantity(quantity + 1)}
-                    className="w-10 h-10 bg-gray-700 hover:bg-gray-600 rounded-md flex items-center justify-center text-white text-lg font-bold"
+                    className="w-9 h-9 rounded-full border border-gray-700 hover:border-gray-500 flex items-center justify-center text-white text-lg font-bold transition-colors"
                   >
                     +
                   </button>
                 </div>
+                {/* Indicador de stock */}
+                {stock > 0 ? (
+                  stock < 5 ? (
+                    <span className="flex items-center gap-1.5 text-xs font-semibold text-amber-400 animate-pulse">
+                      <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+                      Quedan {stock} unidades
+                    </span>
+                  ) : (
+                    <span className="flex items-center gap-1.5 text-xs text-green-400">
+                      <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
+                      Disponible
+                    </span>
+                  )
+                ) : (
+                  <span className="flex items-center gap-1.5 text-xs font-semibold text-red-400 bg-red-500/10 border border-red-500/20 px-2 py-1 rounded-full">
+                    <span className="w-1.5 h-1.5 rounded-full bg-red-500" />
+                    Agotado
+                  </span>
+                )}
               </div>
 
+              {/* Botón principal */}
               <button
                 id="add-to-cart-button"
                 onClick={handleAddToCart}
                 disabled={stock <= 0}
-                className={`w-full bg-gradient-to-r from-yellow-400 via-yellow-500 to-yellow-600 text-black py-3 px-4 rounded-lg font-bold text-lg tracking-wide hover:shadow-lg hover:shadow-yellow-400/20 transition-all duration-200 transform hover:scale-[1.02] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100`}
+                className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-yellow-400 via-yellow-500 to-yellow-600 text-black py-4 px-4 rounded-xl font-bold text-base tracking-wide hover:shadow-lg hover:shadow-yellow-400/25 transition-all duration-200 transform hover:scale-[1.02] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
               >
-                {stock > 0 ? 'AÑADIR AL CARRITO' : 'AGOTADO'}
+                <ShoppingCart className="w-4 h-4" />
+                {stock > 0 ? 'Añadir al carrito' : 'Agotado'}
               </button>
-            </div>
-            
-            {/* Estado de stock - más compacto */}
-            <div className="flex items-center gap-1.5 mt-4">
-              <div className={`w-1.5 h-1.5 rounded-full ${stock > 0 ? 'bg-green-500' : 'bg-red-500'}`}></div>
-              <span className={`text-xs ${stock > 0 ? 'text-green-400' : 'text-red-400'}`}>
-                {stock > 0 ? 'Disponible' : 'Agotado'}
-              </span>
+
+              {/* Sellos de confianza */}
+              <div className="flex items-center justify-center gap-4 pt-1">
+                <span className="flex items-center gap-1 text-gray-600 text-[10px]">
+                  <Lock className="w-3 h-3" /> Pago seguro
+                </span>
+                <span className="flex items-center gap-1 text-gray-600 text-[10px]">
+                  <CreditCard className="w-3 h-3" /> Múltiples métodos
+                </span>
+                <span className="flex items-center gap-1 text-gray-600 text-[10px]">
+                  <Shield className="w-3 h-3" /> Compra protegida
+                </span>
+              </div>
             </div>
           </div>
         </div>
 
-        {/* Sección de productos relacionados - más compacta */}
+        {/* Productos relacionados */}
         {relatedProducts.length > 0 && (
-          <div className="mt-12">
-            <h3 className="text-xl font-bold text-white mb-4">Más de {product?.category?.name || 'esta categoría'}</h3>
-            
-            <div className="relative">
-              <div className="overflow-hidden">
-                <div className="flex gap-4 overflow-x-auto pb-3 scrollbar-thin scrollbar-thumb-gray-700 scrollbar-track-gray-900">
-                  {relatedProducts.map((relatedProduct) => (
-                    <div 
-                      key={relatedProduct.id} 
-                      className="flex-shrink-0 w-56 bg-gray-900 rounded-lg overflow-hidden shadow border border-gray-800 hover:border-yellow-400 transition-colors cursor-pointer"
-                      onClick={() => navigate(`/producto/${relatedProduct.id}`)}
-                    >
-                      <div className="h-40 bg-black flex items-center justify-center p-3">
-                        {isVideoUrl(relatedProduct.image) ? (
-                          <video 
-                            src={buildMediaUrl(relatedProduct.image)} 
-                            className="max-h-full max-w-full object-contain"
-                            muted
-                            playsInline
-                            loop
-                            autoPlay
-                          />
-                        ) : (
-                          <img 
-                            src={buildMediaUrl(relatedProduct.image)}
-                            alt={relatedProduct.name} 
-                            className="max-h-full max-w-full object-contain"
-                          />
-                        )}
-                      </div>
-                      <div className="p-3">
-                        <h4 className="text-white font-medium text-sm truncate">{relatedProduct.name}</h4>
-                        <div className="flex items-center justify-between mt-1.5">
-                          <span className="text-yellow-400 font-bold text-base">
-                            {new Intl.NumberFormat('es-MX', { 
-                              style: 'currency', 
-                              currency: 'MXN' 
-                            }).format(relatedProduct.price)}
-                          </span>
-                          {relatedProduct.original_price && (
-                            <span className="text-gray-500 text-xs line-through">
-                              {new Intl.NumberFormat('es-MX', { 
-                                style: 'currency', 
-                                currency: 'MXN' 
-                              }).format(relatedProduct.original_price)}
-                            </span>
-                          )}
-                        </div>
-                      </div>
+          <div className="mt-14">
+            <div className="flex items-center justify-between mb-5">
+              <h3 className="text-xl font-bold text-white">Más de <span className="text-yellow-400">{product?.category?.name || 'esta categoría'}</span></h3>
+            </div>
+            <div className="flex gap-4 overflow-x-auto pb-3 scrollbar-thin scrollbar-thumb-gray-700 scrollbar-track-transparent">
+              {relatedProducts.map((relatedProduct) => (
+                <div
+                  key={relatedProduct.id}
+                  className="group flex-shrink-0 w-52 bg-gray-900 rounded-2xl overflow-hidden border border-gray-800 hover:border-yellow-400/50 transition-all duration-200 cursor-pointer"
+                  onClick={() => navigate(`/producto/${relatedProduct.id}`)}
+                >
+                  {/* Imagen con overlay */}
+                  <div className="relative h-52 bg-black flex items-center justify-center p-3 overflow-hidden">
+                    {isVideoUrl(relatedProduct.image) ? (
+                      <video
+                        src={buildMediaUrl(relatedProduct.image)}
+                        className="max-h-full max-w-full object-contain"
+                        muted playsInline loop autoPlay
+                      />
+                    ) : (
+                      <img
+                        src={buildMediaUrl(relatedProduct.image)}
+                        alt={relatedProduct.name}
+                        className="max-h-full max-w-full object-contain transition-transform duration-300 group-hover:scale-105"
+                      />
+                    )}
+                    {/* Badge Nuevo */}
+                    {relatedProduct.is_new && (
+                      <span className="absolute top-2 left-2 bg-yellow-400 text-black text-[9px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide">
+                        Nuevo
+                      </span>
+                    )}
+                    {/* Overlay hover */}
+                    <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-colors duration-200 flex items-center justify-center">
+                      <span className="opacity-0 group-hover:opacity-100 transition-opacity duration-200 bg-yellow-400 text-black text-xs font-bold px-3 py-1.5 rounded-full">
+                        Ver producto
+                      </span>
                     </div>
-                  ))}
+                  </div>
+                  {/* Info */}
+                  <div className="p-3">
+                    <h4 className="text-white font-medium text-sm line-clamp-2 leading-snug mb-2">{relatedProduct.name}</h4>
+                    <div className="flex items-end justify-between gap-1">
+                      <span className="text-yellow-400 font-bold text-sm">
+                        {new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(relatedProduct.price)}
+                      </span>
+                      {relatedProduct.original_price && relatedProduct.original_price > relatedProduct.price && (
+                        <span className="text-gray-600 text-xs line-through">
+                          {new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(relatedProduct.original_price)}
+                        </span>
+                      )}
+                    </div>
+                  </div>
                 </div>
-              </div>
+              ))}
             </div>
           </div>
         )}
 
-        {/* Sección de reseñas - más compacta */}
-        <div className="mt-12">
-          <h3 className="text-xl font-bold text-white mb-4">Reseñas de clientes</h3>
-          
-          {reviews.length > 0 ? (
-            <div className="space-y-4 max-h-80 overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-gray-700 scrollbar-track-gray-900">
-              {reviews.map(review => (
-                <div key={review.id} className="bg-gray-900 rounded-lg p-4 shadow border border-gray-800">
-                  <div className="flex items-center mb-1.5">
-                    <span className="font-medium text-yellow-400 mr-2 text-sm">{review.user_name}</span>
-                    <div className="flex text-yellow-400">
-                      {[...Array(5)].map((_, i) => (
-                        <Star 
-                          key={i} 
-                          size={14} 
-                          fill={i < review.rating ? 'currentColor' : 'none'} 
-                          className="mr-0.5" 
+        {/* Sección de reseñas */}
+        <div className="mt-16 max-w-4xl mx-auto">
+          {/* Encabezado */}
+          <div className="flex items-center gap-3 mb-8">
+            <h3 className="text-2xl font-bold text-white">Reseñas</h3>
+            {reviews.length > 0 && (
+              <span className="bg-yellow-400/10 border border-yellow-400/30 text-yellow-400 text-xs font-bold px-2.5 py-1 rounded-full">
+                {reviews.length} {reviews.length === 1 ? 'reseña' : 'reseñas'}
+              </span>
+            )}
+          </div>
+
+          {reviews.length > 0 ? (() => {
+            const avgRating = reviews.reduce((s, r) => s + r.rating, 0) / reviews.length;
+            const ratingCounts = [5, 4, 3, 2, 1].map(star => ({
+              star,
+              count: reviews.filter(r => r.rating === star).length,
+            }));
+            return (
+              <div className="flex flex-col lg:flex-row gap-8">
+                {/* Panel resumen */}
+                <div className="lg:w-56 flex-shrink-0">
+                  <div className="bg-gray-900/60 border border-gray-800 rounded-2xl p-6 text-center">
+                    <p className="text-6xl font-black text-white leading-none mb-1">
+                      {avgRating.toFixed(1)}
+                    </p>
+                    <div className="flex justify-center gap-0.5 my-2">
+                      {[1, 2, 3, 4, 5].map(i => (
+                        <Star
+                          key={i}
+                          size={16}
+                          fill={i <= Math.round(avgRating) ? 'currentColor' : 'none'}
+                          className="text-yellow-400"
                         />
                       ))}
                     </div>
+                    <p className="text-gray-500 text-xs mb-5">{reviews.length} {reviews.length === 1 ? 'opinión' : 'opiniones'}</p>
+                    <div className="space-y-2">
+                      {ratingCounts.map(({ star, count }) => (
+                        <div key={star} className="flex items-center gap-2">
+                          <span className="text-gray-500 text-xs w-3 text-right">{star}</span>
+                          <Star size={10} fill="currentColor" className="text-yellow-400 flex-shrink-0" />
+                          <div className="flex-1 h-1.5 bg-gray-800 rounded-full overflow-hidden">
+                            <div
+                              className="h-full bg-gradient-to-r from-yellow-500 to-yellow-400 rounded-full transition-all duration-500"
+                              style={{ width: reviews.length ? `${(count / reviews.length) * 100}%` : '0%' }}
+                            />
+                          </div>
+                          <span className="text-gray-600 text-xs w-4 text-left">{count}</span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                  <p className="text-gray-300 text-sm mb-1.5">{review.comment}</p>
-                  <span className="text-xs text-gray-500">
-                    {review.created_at ? new Date(review.created_at).toLocaleDateString('es-ES') : 'Fecha no disponible'}
-                  </span>
                 </div>
-              ))}
+
+                {/* Lista de reseñas */}
+                <div className="flex-1 space-y-4 max-h-[32rem] overflow-y-auto pr-1 scrollbar-thin scrollbar-thumb-gray-700 scrollbar-track-transparent">
+                  {reviews.map(review => {
+                    const initials = review.user_name
+                      .split(' ')
+                      .map((n: string) => n[0])
+                      .slice(0, 2)
+                      .join('')
+                      .toUpperCase();
+                    return (
+                      <div
+                        key={review.id}
+                        className="group bg-gray-900/50 hover:bg-gray-900/80 border border-gray-800 hover:border-gray-700 rounded-2xl p-5 transition-all duration-200"
+                      >
+                        <div className="flex items-start gap-3">
+                          {/* Avatar */}
+                          <div className="w-9 h-9 rounded-full bg-gradient-to-br from-yellow-400 to-yellow-600 flex items-center justify-center flex-shrink-0">
+                            <span className="text-black font-bold text-xs">{initials}</span>
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center justify-between gap-2 flex-wrap">
+                              <span className="text-white font-semibold text-sm">{review.user_name}</span>
+                              <span className="text-gray-600 text-xs">
+                                {review.created_at
+                                  ? new Date(review.created_at).toLocaleDateString('es-MX', { day: 'numeric', month: 'short', year: 'numeric' })
+                                  : '—'}
+                              </span>
+                            </div>
+                            {/* Estrellas */}
+                            <div className="flex gap-0.5 mt-1 mb-2">
+                              {[1, 2, 3, 4, 5].map(i => (
+                                <Star
+                                  key={i}
+                                  size={13}
+                                  fill={i <= review.rating ? 'currentColor' : 'none'}
+                                  className={i <= review.rating ? 'text-yellow-400' : 'text-gray-700'}
+                                />
+                              ))}
+                            </div>
+                            {review.comment && (
+                              <p className="text-gray-300 text-sm leading-relaxed">{review.comment}</p>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })() : (
+            <div className="flex flex-col items-center justify-center py-16 text-center">
+              <div className="w-16 h-16 rounded-full bg-gray-900 border border-gray-800 flex items-center justify-center mb-4">
+                <Star size={24} className="text-gray-700" />
+              </div>
+              <p className="text-gray-400 font-medium mb-1">Sin reseñas todavía</p>
+              <p className="text-gray-600 text-sm">Sé el primero en compartir tu experiencia.</p>
             </div>
-          ) : (
-            <p className="text-gray-400 text-sm">Aún no hay reseñas para este producto.</p>
           )}
         </div>
 
-        {/* Formulario de reseña - más compacto */}
+        {/* Formulario de reseña */}
         {reviewPermission === 'can-review' && (
-          <div className="mt-8 bg-gray-900 rounded-lg p-4 shadow border border-gray-800 max-w-lg mx-auto">
-            <h4 className="text-lg font-bold text-white mb-3">Deja tu reseña</h4>
-            <form onSubmit={handleReviewSubmit} className="space-y-3">
-              <div>
-                <label className="block text-gray-300 mb-1 text-sm font-medium">Calificación:</label>
-                <div className="flex items-center">
-                  {[1, 2, 3, 4, 5].map(star => (
-                    <button
-                      key={star}
-                      type="button"
-                      onClick={() => setReviewForm({...reviewForm, rating: star})}
-                      className="mr-1.5 focus:outline-none"
-                    >
-                      <Star 
-                        size={20} 
-                        fill={star <= reviewForm.rating ? 'currentColor' : 'none'} 
-                        className={`${star <= reviewForm.rating ? 'text-yellow-400' : 'text-gray-400'}`}
-                      />
-                    </button>
-                  ))}
+          <div className="mt-10">
+            <div className="bg-gray-900/60 border border-gray-800 rounded-2xl overflow-hidden">
+              {/* Header del form */}
+              <div className="px-6 pt-6 pb-4 border-b border-gray-800">
+                <h4 className="text-lg font-bold text-white">Tu opinión importa</h4>
+                <p className="text-gray-500 text-xs mt-0.5">Comparte tu experiencia con este producto</p>
+              </div>
+              <form onSubmit={handleReviewSubmit} className="p-6 space-y-5">
+                {/* Selector de estrellas */}
+                <div>
+                  <label className="block text-gray-400 text-xs font-semibold uppercase tracking-widest mb-3">
+                    Calificación
+                  </label>
+                  <div className="flex items-center gap-1">
+                    {[1, 2, 3, 4, 5].map(star => (
+                      <button
+                        key={star}
+                        type="button"
+                        onClick={() => setReviewForm({ ...reviewForm, rating: star })}
+                        className="group/star focus:outline-none transition-transform hover:scale-110 active:scale-95"
+                      >
+                        <Star
+                          size={28}
+                          fill={star <= reviewForm.rating ? 'currentColor' : 'none'}
+                          className={`transition-colors duration-100 ${
+                            star <= reviewForm.rating
+                              ? 'text-yellow-400'
+                              : 'text-gray-700 group-hover/star:text-gray-500'
+                          }`}
+                        />
+                      </button>
+                    ))}
+                    <span className="ml-2 text-gray-500 text-sm">
+                      {['', 'Muy malo', 'Malo', 'Regular', 'Bueno', 'Excelente'][reviewForm.rating]}
+                    </span>
+                  </div>
                 </div>
-              </div>
-              <div>
-                <label className="block text-gray-300 mb-1 text-sm font-medium">Comentario:</label>
-                <textarea
-                  className="w-full bg-gray-800 text-white rounded p-2 border border-gray-700 text-sm"
-                  value={reviewForm.comment}
-                  onChange={e => setReviewForm({...reviewForm, comment: e.target.value})}
-                  rows={2}
-                  required
-                  minLength={10}
-                  placeholder="Escribe tu experiencia (mínimo 10 caracteres)"
-                />
-              </div>
-              <button
-                type="submit"
-                disabled={reviewSubmitting}
-                className="w-full bg-gradient-to-r from-yellow-400 via-yellow-500 to-yellow-600 text-black py-2.5 px-4 rounded-lg font-bold text-base tracking-wide hover:shadow hover:shadow-yellow-400/20 transition-all duration-200 transform hover:scale-[1.02] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
-              >
-                {reviewSubmitting ? 'Enviando...' : 'Enviar reseña'}
-              </button>
-            </form>
+                {/* Comentario */}
+                <div>
+                  <label className="block text-gray-400 text-xs font-semibold uppercase tracking-widest mb-2">
+                    Comentario
+                  </label>
+                  <textarea
+                    className="w-full bg-gray-800/60 text-white rounded-xl p-3.5 border border-gray-700 focus:border-yellow-500/50 focus:ring-1 focus:ring-yellow-500/20 text-sm resize-none outline-none transition-colors placeholder-gray-600"
+                    value={reviewForm.comment}
+                    onChange={e => setReviewForm({ ...reviewForm, comment: e.target.value })}
+                    rows={2}
+                    required
+                    minLength={10}
+                    placeholder="Cuéntanos qué te pareció el producto..."
+                  />
+                  <p className="text-gray-700 text-xs mt-1 text-right">{reviewForm.comment.length} / mín. 10</p>
+                </div>
+                <button
+                  type="submit"
+                  disabled={reviewSubmitting}
+                  className="w-full bg-gradient-to-r from-yellow-400 via-yellow-500 to-yellow-600 text-black py-3 px-4 rounded-xl font-bold text-sm tracking-wide hover:shadow-lg hover:shadow-yellow-400/20 transition-all duration-200 transform hover:scale-[1.02] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
+                >
+                  {reviewSubmitting ? (
+                    <span className="flex items-center justify-center gap-2">
+                      <span className="w-4 h-4 border-2 border-black/30 border-t-black rounded-full animate-spin" />
+                      Enviando...
+                    </span>
+                  ) : 'Publicar reseña'}
+                </button>
+              </form>
+            </div>
           </div>
         )}
       </div>

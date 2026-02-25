@@ -14,6 +14,7 @@ export interface Category {
 
 export interface Product {
   id: number;
+  sku?: string;
   name: string;
   price: number;
   original_price?: number;
@@ -27,7 +28,7 @@ export interface Product {
   created_at?: string;
   updated_at?: string;
   category_id: number;
-  stock?: number;
+  stock?: number; // Deprecated: ya no se usa, se usa de product_variants
   has_warranty?: boolean;
   warranty_period?: number;
   warranty_unit?: string;
@@ -40,17 +41,31 @@ export interface Product {
   images?: ProductImage[];
 }
 
+export interface MetalType {
+  id: number;
+  name: string;
+  description?: string;
+  created_at?: string;
+}
+
 export interface ProductVariant {
   id: number;
   product_id: number;
   name: string;
   price: number;
+  sku?: string;
   image?: string;
   model?: string;
   size?: string;
   stock?: number;
   original_price?: number;
   is_active?: boolean;
+  is_default?: boolean;
+  use_product_images?: boolean;
+  use_model_images?: boolean;
+  image_reference_variant_id?: number | null;
+  metal_type?: number;
+  carat?: number;
   variant_images?: VariantImage[]; 
   images?: VariantImage[];
 }
@@ -88,8 +103,20 @@ export interface CartItem {
   variant?: ProductVariant;
 }
 
+/** Datos de transacción (tabla transactions) para desglose de la orden */
+export interface OrderTransaction {
+  id?: number;
+  order_id?: number;
+  amount?: number;
+  subtotal?: number;
+  shipping?: number;
+  taxes?: number;
+  currency?: string;
+}
+
 export interface Order {
   id: number;
+  order_number?: string; // ⭐ NUEVO - el campo que agregaste
   user_id?: string;
   total: number;
   status: OrderStatus;
@@ -100,13 +127,16 @@ export interface Order {
   submitted_at?: string;
   courier_id?: number;
   return_status?: string;
+  stripe_payment_intent_id?: string; // ⭐ Faltaba este
+  billing_snapshot?: any; // ⭐ NUEVO - agregar este
+  shipping_snapshot?: any; // Ya lo tenías pero asegúrate
   order_items?: OrderItem[];
-  // Nueva relación de envío
   shipping_address_id?: number | null;
   shipping_address?: UserAddress | null;
-  shipping_snapshot?: any | null;
   user?: User;
   courier?: Courier;
+  /** Primera transacción de la orden (shipping, taxes, subtotal) */
+  transaction?: OrderTransaction | null;
   // Mantener compatibilidad temporal con código antiguo
   addresses?: UserAddress[];
 }
@@ -136,6 +166,7 @@ export interface OrderItem {
 }
 
 // Nuevo esquema de direcciones de usuario (user_addresses)
+// exterior_number / interior_number para Empak2 (numeroE / numeroI)
 export interface UserAddress {
   id: number;
   user_id: string;
@@ -144,6 +175,8 @@ export interface UserAddress {
   phone?: string;
   address_line1: string;
   address_line2?: string;
+  exterior_number?: string;
+  interior_number?: string;
   city: string;
   state?: string;
   postal_code?: string;
@@ -252,8 +285,8 @@ export interface SalesSummary {
   date: string;
   total_orders: number;
   total_sales: number;
-  avg_order_value: number;
   unique_customers: number;
+  total_returns: number;
 }
 
 export interface SalesFinancial {

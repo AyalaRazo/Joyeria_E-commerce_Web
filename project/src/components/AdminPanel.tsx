@@ -33,7 +33,8 @@ const AdminPanel: React.FC = () => {
   // const { returns, processReturn } = useReturns();
   const [returns, setReturns] = useState<any[]>([]);
   const { users, assignRole, addAdminByEmail} = useUserManagement();
-  const { categories } = useProducts();
+  const { categories, metalTypes } = useProducts();
+  const [metalTypesList, setMetalTypesList] = useState<{ id: number; name: string }[]>([]);
   const userRole = user?.role;
   const canManageCouriers = isAdmin();
   const canViewCouriers = canManageCouriers || userRole === 'worker';
@@ -77,10 +78,7 @@ const AdminPanel: React.FC = () => {
     variantId: string | number | null;
     value: number;
   } | null>(null);
-  const [editingTracking, setEditingTracking] = useState<{
-    orderId: string | number;
-    value: string;
-  } | null>(null);
+  // Removido: edición de tracking_code deshabilitada
   const [editingSubmitted, setEditingSubmitted] = useState<{
     orderId: string | number;
     value: boolean;
@@ -104,6 +102,7 @@ const AdminPanel: React.FC = () => {
   }[]>([]);
   const [currentOrder, setCurrentOrder] = useState<Order | null>(null);
   const [newProduct, setNewProduct] = useState({
+    sku: '',
     name: '',
     price: 0,
     original_price: undefined as number | undefined,
@@ -122,7 +121,10 @@ const AdminPanel: React.FC = () => {
     weight_grams: 100,
     is_high_value: false,
     requires_special_shipping: false,
-    is_active: false
+    is_active: false,
+    metal_type: null as number | null,
+    carat: undefined as number | undefined,
+    product_image_mode: 'base' as 'base' | 'variant'
   });
   const [showAddUser, setShowAddUser] = useState(false);
   const [newUser, setNewUser] = useState({
@@ -137,29 +139,43 @@ const AdminPanel: React.FC = () => {
     productId: number | null;
   }>({ show: false, productId: null });
   const [newVariant, setNewVariant] = useState({
+    sku: '',
     name: '',
     price: 0,
     original_price: undefined as number | undefined,
     model: '',
     size: '',
     stock: 0,
+    metal_type: null as number | null,
+    carat: undefined as number | undefined,
     imageFile: null as File | null,
-    is_active: true
+    is_active: true,
+    is_default: false,
+    use_product_images: true,
+    use_model_images: false,
+    image_reference_variant_id: null as number | null
   });
   const [newVariantImagePreview, setNewVariantImagePreview] = useState<string | null>(null);
   const [newVariantGalleryPreviews, setNewVariantGalleryPreviews] = useState<string[]>([]);
   const [editingVariant, setEditingVariant] = useState<null | {
     id: number;
     product_id: number;
+    sku?: string;
     name: string;
     price: number;
     original_price?: number;
     model?: string;
     size?: string;
     stock?: number;
+    metal_type?: number | null;
+    carat?: number | null;
     image?: string | null;
     variant_images?: Array<{ id: number; url: string }>;
     is_active?: boolean;
+    is_default?: boolean;
+    use_product_images?: boolean;
+    use_model_images?: boolean;
+    image_reference_variant_id?: number | null;
   }>(null);
   const [editingVariantImageFile, setEditingVariantImageFile] = useState<File | null>(null);
   const [editingVariantImagePreview, setEditingVariantImagePreview] = useState<string | null>(null);
@@ -169,6 +185,8 @@ const AdminPanel: React.FC = () => {
   const [editingVariantGalleryFiles, setEditingVariantGalleryFiles] = useState<FileList | null>(null);
   const [editingVariantGalleryPreviews, setEditingVariantGalleryPreviews] = useState<string[]>([]);
   const gallerySuffix = (base: string, index: number) => `${base}_${index + 1}`;
+
+  const [uniqueCustomersValue, setUniqueCustomersValue] = useState(0);
 
   // Estados para dashboard
   const [dashboardData, setDashboardData] = useState<{
@@ -192,10 +210,7 @@ const AdminPanel: React.FC = () => {
 
   // Estados para couriers
   const [couriers, setCouriers] = useState<Courier[]>([]);
-  const [editingCourier, setEditingCourier] = useState<{
-    orderId: number;
-    courierId: number;
-  } | null>(null);
+  // Removido: edición de courier_id deshabilitada
   const [packages, setPackages] = useState<ShippingPackage[]>([]);
   const [editingPackage, setEditingPackage] = useState<ShippingPackage | null>(null);
   const [newPackage, setNewPackage] = useState<Partial<ShippingPackage>>({
@@ -236,6 +251,10 @@ const AdminPanel: React.FC = () => {
         break;
       case 'products':
         fetchProducts();
+        (async () => {
+          const { data } = await supabase.from('metal_types').select('id, name').order('name');
+          setMetalTypesList((data || []) as { id: number; name: string }[]);
+        })();
         break;
       case 'orders':
         fetchCouriers();
@@ -389,9 +408,24 @@ const AdminPanel: React.FC = () => {
   const handleDeletePackage = async (id: number) => {
     if (!confirm('¿Eliminar paquete?')) return;
     try {
+      // Verificar si el paquete está siendo usado en shipping_labels
+      const { data: labelsUsingPackage, error: checkError } = await supabase
+        .from('shipping_labels')
+        .select('id')
+        .eq('shipping_package_id', id)
+        .limit(1);
+      
+      if (checkError) throw checkError;
+      
+      if (labelsUsingPackage && labelsUsingPackage.length > 0) {
+        alert('No se puede eliminar el paquete porque ya está siendo usado en envíos.');
+        return;
+      }
+      
       const { error } = await supabase.from('shipping_packages').delete().eq('id', id);
       if (error) throw error;
       fetchPackages();
+      alert('Paquete eliminado correctamente.');
     } catch (error) {
       console.error('Error deleting package:', error);
       alert('No se pudo eliminar el paquete.');
@@ -413,11 +447,14 @@ const AdminPanel: React.FC = () => {
       const { data: salesFinancialData, error: err2 } = await supabase.rpc('fn_sales_summary_financial', rpcPayload) as { data: SalesFinancial[] | null; error: any };
       const { data: courierPerformanceData, error: err3 } = await supabase.rpc('fn_courier_performance', rpcPayload) as { data: CourierPerformance[] | null; error: any };
       const { data: shippingSummaryData, error: err4 } = await supabase.rpc('fn_shipping_summary', rpcPayload) as { data: ShippingSummary[] | null; error: any };
+      const { data: uniqueCustomers, error: err5 } = await supabase.rpc('fn_unique_customers', rpcPayload) as { data: number | null; error: any };
 
-      if (err1 || err2 || err3 || err4) {
+      if (err1 || err2 || err3 || err4 || err5) {
         console.error('❌ Error fetching dashboard data:', err1 || err2 || err3 || err4);
         return;
       }
+
+      setUniqueCustomersValue(uniqueCustomers ?? 0);
 
       setDashboardData({
         salesSummary: salesSummaryData || [],
@@ -506,30 +543,7 @@ const fetchOrderDetails = async (orderId: number) => {
 };
 
 
-  const handleCourierUpdate = async () => {
-    if (!editingCourier) return;
-
-    try {
-      const { error } = await supabase
-        .from('orders')
-        .update({ courier_id: editingCourier.courierId })
-        .eq('id', editingCourier.orderId);
-
-      if (error) throw error;
-
-      setOrders(prev =>
-        prev.map(o =>
-          o.id === editingCourier.orderId
-            ? { ...o, courier_id: editingCourier.courierId }
-            : o
-        )
-      );
-    } catch (error) {
-      console.error('Error updating courier:', error);
-    } finally {
-      setEditingCourier(null);
-    }
-  };
+  // Removido: handleCourierUpdate - edición de courier deshabilitada
 
   const fetchReturns = async (page = 1, limit = 10) => {
     setLoading(prev => ({ ...prev, returns: true }));
@@ -539,7 +553,7 @@ const fetchOrderDetails = async (orderId: number) => {
 
       const { data, error, count } = await supabase
         .from('returns')
-        .select('*', { count: 'exact' })
+        .select('*, order:orders(order_number)', { count: 'exact' })
         .eq('status', 'processed')
         .order('returned_at', { ascending: false })
         .range(from, to);
@@ -669,30 +683,7 @@ const fetchOrderDetails = async (orderId: number) => {
     }
   };
 
-  const handleTrackingUpdate = async () => {
-    if (!editingTracking) return;
-
-    try {
-      const { error } = await supabase
-        .from('orders')
-        .update({ tracking_code: editingTracking.value })
-        .eq('id', editingTracking.orderId);
-
-      if (error) throw error;
-
-      setOrders(prev =>
-        prev.map(o =>
-          o.id === editingTracking.orderId
-            ? { ...o, tracking_code: editingTracking.value }
-            : o
-        )
-      );
-    } catch (error) {
-      console.error('Error updating tracking code:', error);
-    } finally {
-      setEditingTracking(null);
-    }
-  };
+  // Removido: handleTrackingUpdate - edición de tracking deshabilitada
 
   const handleAddProduct = async () => {
     try {
@@ -744,7 +735,32 @@ const fetchOrderDetails = async (orderId: number) => {
         await supabase.from('product_images').insert(rows);
       }
 
+      // Crear siempre una variante default (modelo principal); el SKU es del modelo principal
+      if (inserted) {
+        const { error: variantError } = await supabase
+          .from('product_variants')
+          .insert([{
+            product_id: inserted.id,
+            name: newProduct.name,
+            price: newProduct.price,
+            original_price: newProduct.original_price,
+            stock: newProduct.stock || 0,
+            is_default: true,
+            sku: newProduct.sku?.trim() || null,
+            metal_type: newProduct.metal_type ?? null,
+            carat: newProduct.carat ?? null,
+            use_product_images: newProduct.product_image_mode === 'variant' ? false : true,
+            is_active: newProduct.is_active ?? true
+          }]);
+
+        if (variantError) {
+          console.error('Error creating default variant:', variantError);
+          // No lanzar error, solo loguear
+        }
+      }
+
       setNewProduct({
+        sku: '',
         name: '',
         price: 0,
         original_price: undefined,
@@ -763,7 +779,10 @@ const fetchOrderDetails = async (orderId: number) => {
         weight_grams: 100,
         is_high_value: false,
         requires_special_shipping: false,
-        is_active: true
+        is_active: true,
+        metal_type: null,
+        carat: undefined,
+        product_image_mode: 'base'
       });
       setShowAddProduct(false);
       setProductMainImageFile(null);
@@ -848,6 +867,18 @@ const fetchOrderDetails = async (orderId: number) => {
 
       if (error) throw error;
 
+      // Actualizar metal_type y carat del modelo principal (variante default)
+      const defaultVariant = variants[product.id]?.find((v: ProductVariant) => v.is_default);
+      if (defaultVariant && ((product as any).metal_type !== undefined || (product as any).carat !== undefined)) {
+        await supabase
+          .from('product_variants')
+          .update({
+            metal_type: (product as any).metal_type ?? null,
+            carat: (product as any).carat ?? null
+          })
+          .eq('id', defaultVariant.id);
+      }
+
       if (editingProductGalleryFiles && editingProductGalleryFiles.length > 0) {
         const existingCount = (product.images?.length || 0) - imagesToDelete.length;
         const categoryName = categories.find(c => c.id === product.category_id)?.name || 'sin_categoria';
@@ -890,17 +921,38 @@ const fetchOrderDetails = async (orderId: number) => {
         imageUrl = await uploadImageToProductsBucket(newVariant.imageFile, categoryName, productName, `variante_${newVariant.name || 'variante'}`);
       }
 
+      // Verificar si ya existe una variante default
+      const existingVariants = variants[showAddVariant.productId] || [];
+      const hasDefault = existingVariants.some(v => v.is_default === true);
+      
+      // Si intenta crear como default y ya existe una, no permitirlo
+      const isDefault = newVariant.is_default && !hasDefault;
+      
+      // Usar la configuración seleccionada por el usuario
+      const useProductImages = newVariant.use_product_images === true;
+      const useModelImages = newVariant.use_model_images === true;
+      const imageReferenceVariantId = newVariant.image_reference_variant_id && useModelImages 
+        ? newVariant.image_reference_variant_id 
+        : null;
+
       const { data: insertedVariant, error } = await supabase
         .from('product_variants')
         .insert([{
           product_id: showAddVariant.productId,
+          sku: newVariant.sku || null,
           name: newVariant.name,
           price: newVariant.price,
           original_price: newVariant.original_price,
           model: newVariant.model,
           size: newVariant.size,
           stock: newVariant.stock,
+          metal_type: newVariant.metal_type ?? null,
+          carat: newVariant.carat ?? null,
           image: imageUrl,
+          is_default: isDefault,
+          use_product_images: useProductImages,
+          use_model_images: useModelImages,
+          image_reference_variant_id: imageReferenceVariantId,
           is_active: newVariant.is_active ?? true
         }])
         .select('*')
@@ -923,7 +975,7 @@ const fetchOrderDetails = async (orderId: number) => {
       }
 
       setShowAddVariant({ show: false, productId: null });
-      setNewVariant({ name: '', price: 0, original_price: undefined, model: '', size: '', stock: 0, imageFile: null, is_active: true });
+      setNewVariant({ sku: '', name: '', price: 0, original_price: undefined, model: '', size: '', stock: 0, metal_type: null, carat: undefined, imageFile: null, is_active: true, is_default: false, use_product_images: true, use_model_images: false, image_reference_variant_id: null });
       setNewVariantGalleryFiles(null);
       setNewVariantImagePreview(null);
       setNewVariantGalleryPreviews([]);
@@ -976,16 +1028,37 @@ const fetchOrderDetails = async (orderId: number) => {
         }
       }
 
+      // Verificar si ya existe otra variante default (excluyendo la actual)
+      const existingVariants = variants[editingVariant.product_id] || [];
+      const hasOtherDefault = existingVariants.some(v => v.id !== editingVariant.id && v.is_default === true);
+      
+      // Si intenta establecer como default y ya existe otra, no permitirlo
+      const isDefault = editingVariant.is_default && !hasOtherDefault;
+      
+      // Usar la configuración seleccionada por el usuario
+      const useProductImages = editingVariant.use_product_images === true;
+      const useModelImages = editingVariant.use_model_images === true;
+      const imageReferenceVariantId = editingVariant.image_reference_variant_id && useModelImages 
+        ? editingVariant.image_reference_variant_id 
+        : null;
+
       const { error } = await supabase
         .from('product_variants')
         .update({
+          sku: editingVariant.sku ?? null,
           name: editingVariant.name,
           price: editingVariant.price,
           original_price: editingVariant.original_price,
           model: editingVariant.model,
           size: editingVariant.size,
           stock: editingVariant.stock,
+          metal_type: editingVariant.metal_type ?? null,
+          carat: editingVariant.carat ?? null,
           image: imageUrl,
+          is_default: isDefault,
+          use_product_images: useProductImages,
+          use_model_images: useModelImages,
+          image_reference_variant_id: imageReferenceVariantId,
           is_active: editingVariant.is_active ?? true
         })
         .eq('id', editingVariant.id);
@@ -1167,7 +1240,6 @@ const fetchOrderDetails = async (orderId: number) => {
     try {
       const success = await assignRole(userId, newRole);
       if (success) {
-        console.log('✅ Rol cambiado y cache limpiado');
         await refreshUserRole(userId);
       }
     } catch (error) {
@@ -1265,18 +1337,12 @@ const fetchOrderDetails = async (orderId: number) => {
       if (token) headers['Authorization'] = `Bearer ${token}`;
       const baseUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1`;
 
-      // Convertir courier_id: si es string vacío o falsy, usar null; si es número, usarlo
-      const courierId = selectedCourierIdForLabels === '' || !selectedCourierIdForLabels 
-        ? null 
-        : Number(selectedCourierIdForLabels);
-
+      // Siempre usar la paquetería de cada orden (no se puede seleccionar otra)
       const requestBody = {
         order_ids: selectedOrderIds,
-        courier_id: courierId,
+        courier_id: null,
         shipping_package_id: selectedPackageIdForLabels
       };
-      
-      console.log('📦 Creando etiquetas:', { baseUrl, orderIds: selectedOrderIds, courierId, requestBody });
       
       const createResp = await fetch(`${baseUrl}/shipping-create`, {
         method: 'POST',
@@ -1303,46 +1369,67 @@ const fetchOrderDetails = async (orderId: number) => {
       
       // El endpoint devuelve { createdLabels: [...] }
       // Cada elemento es { order_id, label: {...} } o { order_id, error: {...} }
+      // RPC puede devolver label como objeto o como array de un elemento
       const labelIds: number[] = [];
       const createdLabels = createData?.createdLabels || [];
-      
+      const firstError: string[] = [];
+
       createdLabels.forEach((entry: any) => {
         if (entry.error) {
+          const errMsg = entry.error?.message || entry.error?.details || entry.error?.hint || JSON.stringify(entry.error);
           console.warn(`Error al crear etiqueta para orden ${entry.order_id}:`, entry.error);
-        } else if (entry.label && entry.label.id) {
-          labelIds.push(Number(entry.label.id));
+          if (firstError.length === 0) firstError.push(errMsg);
+        } else {
+          const label = entry.label;
+          const id = label?.id ?? (Array.isArray(label) ? label[0]?.id : null);
+          if (id) labelIds.push(Number(id));
         }
       });
 
       if (labelIds.length === 0) {
-        throw new Error('No se generaron etiquetas. Verifica que las órdenes estén pagadas y sin tracking.');
+        const errDetail = firstError[0] || 'Verifica que las órdenes estén pagadas, sin tracking, que exista un paquete de envío activo y un courier activo.';
+        throw new Error(`No se generaron etiquetas. ${errDetail}`);
       }
 
-      setShippingStatusMessage(`Procesando ${labelIds.length} etiqueta(s)...`);
+      setShippingStatusMessage(`Generando guías de envío para ${labelIds.length} etiqueta(s)...`);
 
-      const processResp = await fetch(`${baseUrl}/shipping-process`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ label_ids: labelIds })
+      // Generar guías con Empak2 (cada llamada genera la guía y actualiza la etiqueta vía process_shipping_label_with_api)
+      const generatedGuides: { label_id: number; guide?: any; error?: string }[] = [];
+      for (const labelId of labelIds) {
+        try {
+          const guideResp = await fetch(`${baseUrl}/shipping-generate-guide`, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ shipping_label_id: labelId })
+          });
+
+          if (guideResp.ok) {
+            const guideData = await guideResp.json();
+            generatedGuides.push({ label_id: labelId, guide: guideData });
+          } else {
+            const errorText = await guideResp.text();
+            generatedGuides.push({ label_id: labelId, error: errorText });
+          }
+        } catch (error) {
+          console.error(`Error generando guía para label ${labelId}:`, error);
+          generatedGuides.push({ label_id: labelId, error: error instanceof Error ? error.message : 'Error desconocido' });
+        }
+      }
+
+      // shipping-generate-guide ya actualiza la etiqueta (tracking, label_url) vía process_shipping_label_with_api; no hace falta llamar a shipping-process
+      const processedWithGuides = labelIds.map((labelId: number) => {
+        const g = generatedGuides.find(x => x.label_id === labelId);
+        return {
+          label_id: labelId,
+          label: g?.guide ? { id: labelId, tracking_code: g.guide.tracking_code, label_url: g.guide.label_url } : null,
+          error: g?.error,
+          guide: g?.guide,
+          guideError: g?.error
+        };
       });
 
-      if (!processResp.ok) {
-        const errorText = await processResp.text();
-        let err;
-        try {
-          err = JSON.parse(errorText);
-        } catch {
-          err = { error: errorText || 'Error al procesar etiquetas' };
-        }
-        throw new Error(err?.error || 'Error al procesar etiquetas');
-      }
-
-      const processData = await processResp.json();
-      // El endpoint devuelve { processed: [...] }
-      const processed = processData?.processed || [];
-      
       setCreatedLabelIds(labelIds);
-      setProcessedLabels(processed);
+      setProcessedLabels(processedWithGuides);
       setShippingStatusMessage('Etiquetas procesadas. Elige cómo descargar el PDF.');
       setShowCourierModal(false);
       setShowPdfOptionsModal(true);
@@ -1454,8 +1541,10 @@ const fetchOrderDetails = async (orderId: number) => {
   };
 
   const filteredProducts = products.filter(product => {
-    const matchesSearch = product.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      product.id.toString().includes(searchTerm.toLowerCase());
+    const term = searchTerm.toLowerCase();
+    const matchesSearch = product.name.toLowerCase().includes(term) ||
+      (product.sku && product.sku.toLowerCase().includes(term)) ||
+      product.id.toString().includes(term);
     const matchesCategory = categoryFilter === 'all' || product.category_id === categoryFilter;
     const matchesActive = activeFilter === 'all' || 
       (activeFilter === 'active' && product.is_active !== false) ||
@@ -1466,8 +1555,11 @@ const fetchOrderDetails = async (orderId: number) => {
 
   const filteredOrders = orders.filter(order => {
     if (order.status === 'reserved') return false;
-    const matchesSearch = order.id.toString().includes(searchTerm.toLowerCase()) ||
-      (order.tracking_code && order.tracking_code.toLowerCase().includes(searchTerm.toLowerCase()));
+    const term = searchTerm.toLowerCase().trim();
+    const matchesSearch = !term ||
+      (order.order_number && order.order_number.toLowerCase().includes(term)) ||
+      order.id.toString().includes(term) ||
+      (order.tracking_code && order.tracking_code.toLowerCase().includes(term));
     const matchesStatus = statusFilter === 'all' || order.status === statusFilter;
     const matchesSubmitted = submittedFilter === 'all' ||
       (submittedFilter === 'submitted' && order.is_submitted) ||
@@ -1565,6 +1657,56 @@ const fetchOrderDetails = async (orderId: number) => {
       window.scrollTo(0, 0);
     };
 
+    // Calcular qué páginas mostrar
+    const getPageNumbers = () => {
+      const pages: (number | string)[] = [];
+      const maxVisible = 5;
+      
+      if (totalPages <= maxVisible) {
+        // Mostrar todas las páginas si son pocas
+        for (let i = 1; i <= totalPages; i++) {
+          pages.push(i);
+        }
+      } else {
+        // Mostrar primera página
+        pages.push(1);
+        
+        // Calcular inicio y fin del rango visible
+        let start = Math.max(2, currentPagination.page - 1);
+        let end = Math.min(totalPages - 1, currentPagination.page + 1);
+        
+        // Ajustar si estamos cerca del inicio
+        if (currentPagination.page <= 3) {
+          end = Math.min(4, totalPages - 1);
+        }
+        
+        // Ajustar si estamos cerca del final
+        if (currentPagination.page >= totalPages - 2) {
+          start = Math.max(2, totalPages - 3);
+        }
+        
+        // Agregar ellipsis al inicio si es necesario
+        if (start > 2) {
+          pages.push('...');
+        }
+        
+        // Agregar páginas del rango
+        for (let i = start; i <= end; i++) {
+          pages.push(i);
+        }
+        
+        // Agregar ellipsis al final si es necesario
+        if (end < totalPages - 1) {
+          pages.push('...');
+        }
+        
+        // Agregar última página
+        pages.push(totalPages);
+      }
+      
+      return pages;
+    };
+
     return (
       <div className="flex items-center justify-between mt-4 px-6 py-3 bg-gray-700">
         <div className="text-sm text-gray-400">
@@ -1583,9 +1725,31 @@ const fetchOrderDetails = async (orderId: number) => {
             Anterior
           </button>
 
-          <span className="text-sm text-gray-300">
-            Página {currentPagination.page} de {totalPages}
-          </span>
+          <div className="flex items-center space-x-1">
+            {getPageNumbers().map((page, index) => {
+              if (page === '...') {
+                return (
+                  <span key={`ellipsis-${index}`} className="px-2 text-gray-400">
+                    ...
+                  </span>
+                );
+              }
+              const pageNum = page as number;
+              return (
+                <button
+                  key={pageNum}
+                  onClick={() => handlePageChange(pageNum)}
+                  className={`px-3 py-1 rounded text-sm ${
+                    currentPagination.page === pageNum
+                      ? 'bg-yellow-500 text-black font-bold'
+                      : 'bg-gray-600 hover:bg-gray-500 text-white'
+                  }`}
+                >
+                  {pageNum}
+                </button>
+              );
+            })}
+          </div>
 
           <button
             onClick={() => handlePageChange(currentPagination.page + 1)}
@@ -1602,11 +1766,10 @@ const fetchOrderDetails = async (orderId: number) => {
 
   // 💰 Calcular métricas principales
   const totalSales = dashboardData.salesFinancial.reduce((sum, i) => sum + (i.total_sales || 0), 0);
-  const totalOrders = dashboardData.salesFinancial.reduce((sum, i) => sum + (i.total_orders || 0), 0);
-  const totalReturns = dashboardData.salesFinancial.reduce((sum, i) => sum + (i.total_returns || 0), 0);
+  const totalOrders = dashboardData.salesSummary.reduce((sum, i) => sum + (i.total_orders || 0), 0);
+  const totalReturns = dashboardData.salesSummary.reduce((sum, i) => sum + (i.total_returns || 0), 0);
   const platformFees = dashboardData.salesFinancial.reduce((sum, i) => sum + (i.total_platform_fee || 0), 0);
   const jewelerEarnings = dashboardData.salesFinancial.reduce((sum, i) => sum + (i.total_jeweler_earnings || 0), 0);
-  const uniqueCustomers = dashboardData.salesSummary.reduce((sum, i) => sum + (i.unique_customers || 0), 0);
 
   return (
     <div className="min-h-screen bg-gray-900 text-gray-100">
@@ -1908,7 +2071,7 @@ const fetchOrderDetails = async (orderId: number) => {
       {[
         { title: 'Ventas Totales', value: `$${totalSales.toLocaleString()}`, color: 'from-green-900/30 to-green-800/30 border-green-500/30', icon: <TrendingUp className="h-8 w-8 text-green-400" /> },
         { title: 'Órdenes Totales', value: totalOrders, color: 'from-blue-900/30 to-blue-800/30 border-blue-500/30', icon: <Package className="h-8 w-8 text-blue-400" /> },
-        { title: 'Clientes Únicos', value: uniqueCustomers, color: 'from-purple-900/30 to-purple-800/30 border-purple-500/30', icon: <Users className="h-8 w-8 text-purple-400" /> },
+        { title: 'Clientes Únicos', value: uniqueCustomersValue, color: 'from-purple-900/30 to-purple-800/30 border-purple-500/30', icon: <Users className="h-8 w-8 text-purple-400" /> },
         { title: 'Devoluciones', value: totalReturns, color: 'from-orange-900/30 to-orange-800/30 border-orange-500/30', icon: <RotateCcw className="h-8 w-8 text-orange-400" /> },
         { title: 'Ganancia Joyero', value: `$${jewelerEarnings.toLocaleString()}`, color: 'from-yellow-900/30 to-yellow-800/30 border-yellow-500/30', icon: <Coins className="h-8 w-8 text-yellow-400" /> },
         { title: 'Comisión Plataforma', value: `$${platformFees.toLocaleString()}`, color: 'from-teal-900/30 to-teal-800/30 border-teal-500/30', icon: <DollarSign className="h-8 w-8 text-teal-400" /> },
@@ -2014,12 +2177,10 @@ const fetchOrderDetails = async (orderId: number) => {
               <table className="w-full">
                 <thead className="bg-gray-700">
                   <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Producto</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Producto / Modelo / Talla</th>
                     <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Precio</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Categoría</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Estado</th>
                     <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Stock</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Variantes</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Estado</th>
                     <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Acciones</th>
                   </tr>
                 </thead>
@@ -2029,253 +2190,328 @@ const fetchOrderDetails = async (orderId: number) => {
                     const startIndex = (currentPagination.page - 1) * currentPagination.limit;
                     const endIndex = startIndex + currentPagination.limit;
                     const paginatedProducts = filteredProducts.slice(startIndex, endIndex);
-                    return paginatedProducts.map((product) => (
-                    <React.Fragment key={product.id}>
-                      <tr>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="flex items-center">
-        {isVideoUrl(product.image) ? (
-          <video
-            src={buildMediaUrl(product.image)}
-                                className="h-8 w-8 rounded-md object-cover"
-                                muted
-                                playsInline
-                              />
-                            ) : (
-          <img
-            src={buildMediaUrl(product.image)}
-                                alt={product.name}
-                                className="h-8 w-8 rounded-md object-cover"
-                              />
-                            )}
-                            <div className="ml-4">
-                              <div className="font-medium">{product.name}</div>
-                              <div className="text-gray-400 text-sm">ID: {product.id}</div>
-                            </div>
-                          </div>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="text-lg font-semibold">${product.price.toFixed(2)}</div>
-                          {product.original_price && product.original_price > product.price && (
-                            <div className="text-sm text-gray-400 line-through">
-                              ${product.original_price.toFixed(2)}
-                            </div>
-                          )}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <span className="px-2 py-1 bg-gray-700 rounded text-sm">
-                            {categories.find(c => c.id === product.category_id)?.name || 'Sin categoría'}
-                          </span>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <span className={`px-2 py-1 rounded-full text-xs font-medium ${product.is_active !== false ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
-                            {product.is_active !== false ? 'Activo' : 'Inactivo'}
-                          </span>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          {editingStock?.productId === product.id && !editingStock.variantId ? (
-                            <div className="flex items-center space-x-2">
-                              <input
-                                type="number"
-                                value={editingStock.value}
-                                onChange={(e) =>
-                                  setEditingStock({
-                                    ...editingStock,
-                                    value: parseInt(e.target.value) || 0
-                                  })
-                                }
-                                className="w-20 bg-gray-700 border border-gray-600 rounded px-2 py-1"
-                              />
-                              <button
-                                onClick={handleStockUpdate}
-                                className="text-green-400 hover:text-green-300"
-                              >
-                                <Save className="h-4 w-4" />
-                              </button>
-                              <button
-                                onClick={() => setEditingStock(null)}
-                                className="text-red-400 hover:text-red-300"
-                              >
-                                <X className="h-4 w-4" />
-                              </button>
-                            </div>
-                          ) : (
-                            <div className="flex items-center">
-                              <span>{product.stock}</span>
-                              <button
-                                onClick={() =>
-                                  setEditingStock({
-                                    productId: product.id,
-                                    variantId: null,
-                                    value: product.stock || 0
-                                  })
-                                }
-                                className="ml-2 text-yellow-400 hover:text-yellow-300"
-                              >
-                                <Edit className="h-4 w-4" />
-                              </button>
-                            </div>
-                          )}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          {variants[product.id]?.length || 0}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="flex items-center space-x-2">
-                            <button
-                              onClick={() => setEditingProduct(product)}
-                              className="text-blue-400 hover:text-blue-300"
-                              title="Editar producto"
-                            >
-                              <Edit className="h-4 w-4" />
-                            </button>
-                            <button
-                              onClick={() => {
-                                setShowAddVariant({ show: true, productId: Number(product.id) });
-                                setNewVariant({ name: '', price: 0, original_price: undefined, model: '', size: '', stock: 0, imageFile: null, is_active: true });
-                                setNewVariantGalleryFiles(null);
-                              }}
-                              className="text-yellow-400 hover:text-yellow-300"
-                              title="Agregar variante"
-                            >
-                              <Plus className="h-4 w-4" />
-                            </button>
-                            <button
-                              onClick={() => {
-                                fetchProductDetails(product.id);
-                                setShowProductDetails({ show: true, productId: product.id });
-                              }}
-                              className="text-green-400 hover:text-green-300"
-                              title="Ver detalles"
-                            >
-                              <Eye className="h-4 w-4" />
-                            </button>
-                            {isAdmin() && (
-                              <button
-                                onClick={() => handleDeleteProduct(product.id)}
-                                className="text-red-400 hover:text-red-300"
-                                title="Eliminar producto"
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </button>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                      {/* Variants rows */}
-                      {variants[product.id]?.map((variant) => (
-                        <tr key={variant.id} className="bg-gray-750">
-                          <td className="px-6 py-4 whitespace-nowrap pl-16">
-                            <div className="flex items-center">
-                              {variant.image && (
-                                isVideoUrl(variant.image) ? (
+                    
+                    return paginatedProducts.map((product) => {
+                      // Agrupar variantes por modelo
+                      const productVariants = variants[product.id] || [];
+                      const defaultVariant = productVariants.find(v => v.is_default === true);
+                      const variantsByModel = productVariants.reduce((acc, variant) => {
+                        const modelKey = variant.model || 'default';
+                        if (!acc[modelKey]) {
+                          acc[modelKey] = [];
+                        }
+                        acc[modelKey].push(variant);
+                        return acc;
+                      }, {} as Record<string, typeof productVariants>);
+                      
+                      // Ordenar modelos: primero el default, luego los demás
+                      const modelKeys = Object.keys(variantsByModel).sort((a, b) => {
+                        if (a === 'default' || defaultVariant?.model === a) return -1;
+                        if (b === 'default' || defaultVariant?.model === b) return 1;
+                        return a.localeCompare(b);
+                      });
+                      
+                      return (
+                        <React.Fragment key={product.id}>
+                          {/* Fila del producto */}
+                          <tr className="bg-gray-800/50">
+                            <td className="px-6 py-4 whitespace-nowrap" colSpan={5}>
+                              <div className="flex items-center space-x-4">
+                                {isVideoUrl(product.image) ? (
                                   <video
-                                    src={buildMediaUrl(variant.image)}
-                                    className="h-10 w-10 rounded-md object-cover mr-4"
+                                    src={buildMediaUrl(product.image)}
+                                    className="h-12 w-12 rounded-md object-cover"
                                     muted
                                     playsInline
                                   />
                                 ) : (
                                   <img
-                                    src={buildMediaUrl(variant.image)}
-                                    alt={variant.name}
-                                    className="h-10 w-10 rounded-md object-cover mr-4"
+                                    src={buildMediaUrl(product.image)}
+                                    alt={product.name}
+                                    className="h-12 w-12 rounded-md object-cover"
                                   />
-                                )
-                              )}
-                              <div>
-                                <div className="font-medium">{variant.name}</div>
-                                <div className="text-gray-400 text-sm">
-                                  {variant.size && `Talla: ${variant.size}`}
-                                  {variant.model && ` | Modelo: ${variant.model}`}
+                                )}
+                                <div className="flex-1">
+                                  <div className="font-bold text-lg">{product.name}</div>
+                                  <div className="text-gray-400 text-sm">{categories.find(c => c.id === product.category_id)?.name || 'Sin categoría'}</div>
+                                </div>
+                                <div className="flex items-center space-x-2">
+                                  <button
+                                    onClick={() => {
+                                      const defaultV = variants[product.id]?.find((v: ProductVariant) => v.is_default);
+                                      setEditingProduct({
+                                        ...product,
+                                        sku: (defaultV as any)?.sku ?? (product as any).sku ?? '',
+                                        ...(defaultV && {
+                                          metal_type: defaultV.metal_type ?? undefined,
+                                          carat: defaultV.carat ?? undefined
+                                        })
+                                      } as Product);
+                                    }}
+                                    className="text-blue-400 hover:text-blue-300"
+                                    title="Editar producto"
+                                  >
+                                    <Edit className="h-4 w-4" />
+                                  </button>
+                                  <button
+                                    onClick={() => {
+                                      fetchProductDetails(product.id);
+                                      setShowProductDetails({ show: true, productId: product.id });
+                                    }}
+                                    className="text-green-400 hover:text-green-300"
+                                    title="Ver detalles"
+                                  >
+                                    <Eye className="h-4 w-4" />
+                                  </button>
+                                  {isAdmin() && (
+                                    <button
+                                      onClick={() => handleDeleteProduct(product.id)}
+                                      className="text-red-400 hover:text-red-300"
+                                      title="Eliminar producto"
+                                    >
+                                      <Trash2 className="h-4 w-4" />
+                                    </button>
+                                  )}
                                 </div>
                               </div>
-                            </div>
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            {editingStock?.variantId === variant.id ? (
-                              <div className="flex items-center space-x-2">
-                                <input
-                                  type="number"
-                                  value={editingStock.value}
-                                  onChange={(e) =>
-                                    setEditingStock({
-                                      ...editingStock,
-                                      value: parseInt(e.target.value) || 0
-                                    })
-                                  }
-                                  className="w-20 bg-gray-700 border border-gray-600 rounded px-2 py-1"
-                                />
-                                <button
-                                  onClick={handleStockUpdate}
-                                  className="text-green-400 hover:text-green-300"
-                                >
-                                  <Save className="h-4 w-4" />
-                                </button>
-                                <button
-                                  onClick={() => setEditingStock(null)}
-                                  className="text-red-400 hover:text-red-300"
-                                >
-                                  <X className="h-4 w-4" />
-                                </button>
-                              </div>
-                            ) : (
-                              <div className="flex items-center">
-                                <span>{variant.stock}</span>
-                                <button
-                                  onClick={() =>
-                                    setEditingStock({
-                                      productId: product.id,
-                                      variantId: variant.id,
-                                      value: variant.stock || 0
-                                    })
-                                  }
-                                  className="ml-2 text-yellow-400 hover:text-yellow-300"
-                                >
-                                  <Edit className="h-4 w-4" />
-                                </button>
-                              </div>
-                            )}
-                          </td>
-                          <td colSpan={1} className="px-6 py-4 whitespace-nowrap text-gray-400">
-                            Variante
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <div className="flex items-center space-x-2">
-                              <button
-                                onClick={() => {
-                                  const variantWithImages = variants[product.id]?.find(v => v.id === variant.id);
-                                  setEditingVariant({
-                                    id: Number(variant.id),
-                                    product_id: Number(variant.product_id),
-                                    name: variant.name,
-                                    price: Number(variant.price),
-                                    original_price: variant.original_price ? Number(variant.original_price) : undefined,
-                                    model: variant.model || '',
-                                    size: variant.size || '',
-                                    stock: Number(variant.stock || 0),
-                                    image: variant.image || null,
-                                    variant_images: (variantWithImages as any)?.variant_images || []
-                                  });
-                                }}
-                                className="text-blue-400 hover:text-blue-300"
-                                title="Editar variante"
-                              >
-                                <Edit className="h-4 w-4" />
-                              </button>
-                              <button
-                                onClick={() => handleDeleteVariant(Number(variant.id))}
-                                className="text-red-400 hover:text-red-300"
-                                title="Eliminar variante"
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </React.Fragment>
-                    ));
+                            </td>
+                          </tr>
+                          
+                          {/* Modelos y sus tallas */}
+                          {modelKeys.map((modelKey) => {
+                            const modelVariants = variantsByModel[modelKey];
+                            const isDefaultModel = modelKey === 'default' || defaultVariant?.model === modelKey;
+                            const firstVariant = modelVariants[0];
+                            const modelImage = isDefaultModel 
+                              ? product.image 
+                              : (firstVariant?.image && !firstVariant?.use_product_images ? firstVariant.image : product.image);
+                            
+                            return (
+                              <React.Fragment key={modelKey}>
+                                {/* Fila del modelo */}
+                                <tr className="bg-gray-750/50">
+                                  <td className="px-6 py-3 whitespace-nowrap pl-12">
+                                    <div className="flex items-center space-x-3">
+                                      {modelImage && (
+                                        isVideoUrl(modelImage) ? (
+                                          <video
+                                            src={buildMediaUrl(modelImage)}
+                                            className="h-10 w-10 rounded-md object-cover"
+                                            muted
+                                            playsInline
+                                          />
+                                        ) : (
+                                          <img
+                                            src={buildMediaUrl(modelImage)}
+                                            alt={firstVariant?.name || product.name}
+                                            className="h-10 w-10 rounded-md object-cover"
+                                          />
+                                        )
+                                      )}
+                                      <div>
+                                        <div className="font-medium text-gray-200">
+                                          {isDefaultModel ? 'Default o Modelo Principal' : (firstVariant?.model || 'Sin modelo')}
+                                        </div>
+                                        <div className="text-gray-400 text-xs">
+                                          SKU: {(firstVariant as any)?.sku || '—'}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </td>
+                                  <td className="px-6 py-3 whitespace-nowrap">
+                                    <div className="text-sm">${firstVariant?.price?.toFixed(2) || product.price.toFixed(2)}</div>
+                                    <div className="text-gray-400 text-xs">SKU: {(firstVariant as any)?.sku || '—'}</div>
+                                  </td>
+                                  <td className="px-6 py-3 whitespace-nowrap">
+                                    <div className="text-gray-400 text-xs">
+                                      {modelVariants.length} talla{modelVariants.length !== 1 ? 's' : ''}
+                                    </div>
+                                  </td>
+                                  <td className="px-6 py-3 whitespace-nowrap">
+                                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${firstVariant?.is_active !== false ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
+                                      {firstVariant?.is_active !== false ? 'Activo' : 'Inactivo'}
+                                    </span>
+                                  </td>
+                                  <td className="px-6 py-3 whitespace-nowrap">
+                                    <div className="flex items-center space-x-2">
+                                      <button
+                                        onClick={() => {
+                                          // Editar el modelo (primera variante del modelo)
+                                          const variantWithImages = variants[product.id]?.find(v => v.id === firstVariant.id);
+                                          setEditingVariant({
+                                            id: Number(firstVariant.id),
+                                            product_id: Number(firstVariant.product_id),
+                                            sku: (firstVariant as any).sku ?? '',
+                                            name: firstVariant.name,
+                                            price: Number(firstVariant.price),
+                                            original_price: firstVariant.original_price ? Number(firstVariant.original_price) : undefined,
+                                            model: firstVariant.model || '',
+                                            size: firstVariant.size || '',
+                                            stock: Number(firstVariant.stock || 0),
+                                            metal_type: firstVariant.metal_type ?? null,
+                                            carat: firstVariant.carat ?? null,
+                                            image: firstVariant.image || null,
+                                            variant_images: (variantWithImages as any)?.variant_images || [],
+                                            is_default: firstVariant.is_default || false,
+                                            use_product_images: firstVariant.use_product_images ?? true,
+                                            use_model_images: firstVariant.use_model_images ?? false,
+                                            image_reference_variant_id: firstVariant.image_reference_variant_id || null
+                                          });
+                                        }}
+                                        className="text-blue-400 hover:text-blue-300 text-xs"
+                                        title="Editar modelo"
+                                      >
+                                        <Edit className="h-3 w-3" />
+                                      </button>
+                                      <button
+                                        onClick={() => {
+                                          setShowAddVariant({ show: true, productId: Number(product.id) });
+                                          setNewVariant({ 
+                                            sku: '',
+                                            name: '', 
+                                            price: firstVariant?.price || product.price, 
+                                            original_price: firstVariant?.original_price || product.original_price, 
+                                            model: isDefaultModel ? '' : (firstVariant?.model || ''), 
+                                            size: '', 
+                                            stock: 0, 
+                                            metal_type: null,
+                                            carat: undefined,
+                                            imageFile: null, 
+                                            is_active: true, 
+                                            is_default: false,
+                                            use_product_images: true,
+                                            use_model_images: false,
+                                            image_reference_variant_id: null
+                                          });
+                                          setNewVariantGalleryFiles(null);
+                                        }}
+                                        className="text-yellow-400 hover:text-yellow-300 text-xs"
+                                        title="Agregar talla a este modelo"
+                                      >
+                                        <Plus className="h-3 w-3" />
+                                      </button>
+                                    </div>
+                                  </td>
+                                </tr>
+                                
+                                {/* Filas de tallas */}
+                                {modelVariants.map((variant) => (
+                                  <tr key={variant.id} className="bg-gray-700/30">
+                                    <td className="px-6 py-2 whitespace-nowrap pl-20">
+                                      <div className="flex items-center space-x-2">
+                                        <span className="text-gray-300">#</span>
+                                        <span className="font-medium text-gray-200">{variant.size || 'Sin talla'}</span>
+                                      </div>
+                                    </td>
+                                    <td className="px-6 py-2 whitespace-nowrap">
+                                      <div className="text-sm">${variant.price.toFixed(2)}</div>
+                                      <div className="text-gray-400 text-xs">SKU: {(variant as any)?.sku || '—'}</div>
+                                      {variant.original_price && variant.original_price > variant.price && (
+                                        <div className="text-xs text-gray-400 line-through">
+                                          ${variant.original_price.toFixed(2)}
+                                        </div>
+                                      )}
+                                    </td>
+                                    <td className="px-6 py-2 whitespace-nowrap">
+                                      {editingStock?.variantId === variant.id ? (
+                                        <div className="flex items-center space-x-2">
+                                          <input
+                                            type="number"
+                                            value={editingStock.value}
+                                            onChange={(e) =>
+                                              setEditingStock({
+                                                ...editingStock,
+                                                value: parseInt(e.target.value) || 0
+                                              })
+                                            }
+                                            className="w-20 bg-gray-700 border border-gray-600 rounded px-2 py-1 text-sm"
+                                          />
+                                          <button
+                                            onClick={handleStockUpdate}
+                                            className="text-green-400 hover:text-green-300"
+                                          >
+                                            <Save className="h-3 w-3" />
+                                          </button>
+                                          <button
+                                            onClick={() => setEditingStock(null)}
+                                            className="text-red-400 hover:text-red-300"
+                                          >
+                                            <X className="h-3 w-3" />
+                                          </button>
+                                        </div>
+                                      ) : (
+                                        <div className="flex items-center space-x-2">
+                                          <span className="text-sm">{variant.stock || 0}</span>
+                                          <button
+                                            onClick={() =>
+                                              setEditingStock({
+                                                productId: product.id,
+                                                variantId: variant.id,
+                                                value: variant.stock || 0
+                                              })
+                                            }
+                                            className="text-yellow-400 hover:text-yellow-300"
+                                            title="Editar stock de talla"
+                                          >
+                                            <Edit className="h-3 w-3" />
+                                          </button>
+                                        </div>
+                                      )}
+                                    </td>
+                                    <td className="px-6 py-2 whitespace-nowrap">
+                                      <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${variant.is_active !== false ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
+                                        {variant.is_active !== false ? 'Activo' : 'Inactivo'}
+                                      </span>
+                                    </td>
+                                    <td className="px-6 py-2 whitespace-nowrap">
+                                      <div className="flex items-center space-x-2">
+                                        <button
+                                          onClick={() => {
+                                            const variantWithImages = variants[product.id]?.find(v => v.id === variant.id);
+                                            setEditingVariant({
+                                              id: Number(variant.id),
+                                              product_id: Number(variant.product_id),
+                                              sku: (variant as any).sku ?? '',
+                                              name: variant.name,
+                                              price: Number(variant.price),
+                                              original_price: variant.original_price ? Number(variant.original_price) : undefined,
+                                              model: variant.model || '',
+                                              size: variant.size || '',
+                                              stock: Number(variant.stock || 0),
+                                              metal_type: variant.metal_type ?? null,
+                                              carat: variant.carat ?? null,
+                                              image: variant.image || null,
+                                              variant_images: (variantWithImages as any)?.variant_images || [],
+                                              is_default: variant.is_default || false,
+                                              use_product_images: variant.use_product_images ?? true,
+                                              use_model_images: variant.use_model_images ?? false,
+                                              image_reference_variant_id: variant.image_reference_variant_id || null
+                                            });
+                                          }}
+                                          className="text-blue-400 hover:text-blue-300"
+                                          title="Editar talla"
+                                        >
+                                          <Edit className="h-3 w-3" />
+                                        </button>
+                                        {!variant.is_default && (
+                                        <button
+                                          onClick={() => handleDeleteVariant(Number(variant.id))}
+                                          className="text-red-400 hover:text-red-300"
+                                          title="Eliminar talla"
+                                        >
+                                          <Trash2 className="h-3 w-3" />
+                                        </button>
+                                        )}
+                                      </div>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </React.Fragment>
+                            );
+                          })}
+                        </React.Fragment>
+                      );
+                    });
                   })()}
                 </tbody>
               </table>
@@ -2397,30 +2633,43 @@ const fetchOrderDetails = async (orderId: number) => {
                           type="checkbox"
                           checked={selectedOrderIds.includes(order.id as number)}
                           onChange={() => toggleOrderSelection(order.id as number)}
-                          aria-label={`Seleccionar orden ${order.id}`}
+                          aria-label={`Seleccionar orden ${order.order_number || order.id}`}
                         />
                       </td>
                       <td className="px-3 sm:px-6 py-3 sm:py-4 whitespace-nowrap">
-                        <div className="font-medium text-sm">#{order.id}</div>
+                        <div className="font-medium text-sm">#{order.order_number || order.id}</div>
                         <div className="text-gray-400 text-xs">
                           {order.order_items?.length || 0} producto(s)
                         </div>
                       </td>
                       <td className="px-3 sm:px-6 py-3 sm:py-4 whitespace-nowrap text-sm">
-                        {order.created_at ? new Date(order.created_at).toLocaleDateString() : 'N/A'}
+                        {order.created_at ? (() => {
+                          const orderDate = new Date(order.created_at);
+                          const today = new Date();
+                          const isToday = orderDate.toDateString() === today.toDateString();
+                          if (isToday) {
+                            return orderDate.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+                          }
+                          return orderDate.toLocaleDateString();
+                        })() : 'N/A'}
                       </td>
                       <td className="px-3 sm:px-6 py-3 sm:py-4 whitespace-nowrap">
                         <span
-                          className={`px-2 py-1 rounded-full text-xs font-medium ${order.status === 'entregado'
-                            ? 'bg-green-500/20 text-green-400'
-                            : order.status === 'cancelado'
-                              ? 'bg-red-500/20 text-red-400'
-                              : order.status === 'devuelto'
-                                ? 'bg-orange-500/20 text-orange-400'
-                                : 'bg-yellow-500/20 text-yellow-400'
+                          className={`px-2 py-1 rounded-full text-xs font-medium capitalize ${
+                            order.status === 'entregado'
+                              ? 'bg-green-500/20 text-green-400'
+                              : order.status === 'pagado'
+                                ? 'bg-blue-500/20 text-blue-400'
+                                : order.status === 'cancelado'
+                                  ? 'bg-red-500/20 text-red-400'
+                                  : order.status === 'devuelto' || order.status === 'parcialmente_devuelto' || order.status === 'reembolsado'
+                                    ? 'bg-orange-500/20 text-orange-400'
+                                    : order.status === 'procesando' || order.status === 'enviado'
+                                      ? 'bg-cyan-500/20 text-cyan-400'
+                                      : 'bg-yellow-500/20 text-yellow-400'
                             }`}
                         >
-                          {order.status}
+                          {order.status ? order.status.charAt(0).toUpperCase() + order.status.slice(1).toLowerCase() : order.status}
                         </span>
                       </td>
                       <td className="px-3 sm:px-6 py-3 sm:py-4 whitespace-nowrap text-sm">
@@ -2478,105 +2727,26 @@ const fetchOrderDetails = async (orderId: number) => {
                         )}
                       </td>
                       <td className="px-3 sm:px-6 py-3 sm:py-4 whitespace-nowrap">
-                        {editingTracking?.orderId === order.id ? (
-                          <div className="flex items-center space-x-2">
-                            <input
-                              type="text"
-                              value={editingTracking.value}
-                              onChange={(e) =>
-                                setEditingTracking({
-                                  ...editingTracking,
-                                  value: e.target.value
-                                })
-                              }
-                              className="bg-gray-700 border border-gray-600 rounded px-2 py-1 flex-1"
-                              placeholder="Código de rastreo"
-                            />
-                            <button
-                              onClick={handleTrackingUpdate}
-                              className="text-green-400 hover:text-green-300"
-                            >
-                              <Save className="h-4 w-4" />
-                            </button>
-                            <button
-                              onClick={() => setEditingTracking(null)}
-                              className="text-red-400 hover:text-red-300"
-                            >
-                              <X className="h-4 w-4" />
-                            </button>
-                          </div>
-                        ) : (
-                          <div className="flex items-center">
-                            {order.tracking_code ? (
-                              <>
-                                <Package className="h-4 w-4 mr-2 text-yellow-400" />
-                                <span>{order.tracking_code}</span>
-                              </>
-                            ) : (
-                              <span className="text-gray-400">Sin código</span>
-                            )}
-                            <button
-                              onClick={() =>
-                                setEditingTracking({
-                                  orderId: order.id,
-                                  value: order.tracking_code || ''
-                                })
-                              }
-                              className="ml-2 text-yellow-400 hover:text-yellow-300"
-                            >
-                              <Edit className="h-4 w-4" />
-                            </button>
-                          </div>
-                        )}
+                        <div className="flex items-center">
+                          {order.tracking_code ? (
+                            <>
+                              <Package className="h-4 w-4 mr-2 text-yellow-400" />
+                              <span>{order.tracking_code}</span>
+                            </>
+                          ) : (
+                            <span className="text-gray-400">Sin código</span>
+                          )}
+                        </div>
                       </td>
                       <td className="px-3 sm:px-6 py-3 sm:py-4 whitespace-nowrap">
-                        {editingCourier?.orderId === order.id ? (
-                          <div className="flex items-center space-x-2">
-                            <select
-                              value={editingCourier.courierId}
-                              onChange={(e) => setEditingCourier({
-                                ...editingCourier,
-                                courierId: parseInt(e.target.value)
-                              })}
-                              className="bg-gray-700 border border-gray-600 rounded px-2 py-1"
-                            >
-                              <option value="">Sin paquetería</option>
-                              {couriers.map(courier => (
-                                <option key={courier.id} value={courier.id}>{courier.name}</option>
-                              ))}
-                            </select>
-                            <button
-                              onClick={handleCourierUpdate}
-                              className="text-green-400 hover:text-green-300"
-                            >
-                              <Save className="h-4 w-4" />
-                            </button>
-                            <button
-                              onClick={() => setEditingCourier(null)}
-                              className="text-red-400 hover:text-red-300"
-                            >
-                              <X className="h-4 w-4" />
-                            </button>
-                          </div>
-                        ) : (
-                          <div className="flex items-center">
-                            <span className="text-gray-300">
-                              {order.courier_id ?
-                                couriers.find(c => c.id === order.courier_id)?.name || 'Paquetería no encontrada' :
-                                'Sin paquetería'
-                              }
-                            </span>
-                            <button
-                              onClick={() => setEditingCourier({
-                                orderId: order.id,
-                                courierId: order.courier_id || 0
-                              })}
-                              className="ml-2 text-yellow-400 hover:text-yellow-300"
-                            >
-                              <Edit className="h-4 w-4" />
-                            </button>
-                          </div>
-                        )}
+                        <div className="flex items-center">
+                          <span className="text-gray-300">
+                            {order.courier_id ?
+                              couriers.find(c => c.id === order.courier_id)?.name || 'Paquetería no encontrada' :
+                              'Sin paquetería'
+                            }
+                          </span>
+                        </div>
                       </td>
                       <td className="px-3 sm:px-6 py-3 sm:py-4 whitespace-nowrap">
                         <div className="flex items-center space-x-2">
@@ -2754,7 +2924,7 @@ const fetchOrderDetails = async (orderId: number) => {
                         <div className="font-medium">#{returnItem.id}</div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="font-medium">#{returnItem.order_id}</div>
+                        <div className="font-medium">#{(returnItem as any).order?.order_number ?? (returnItem as any).orders?.order_number ?? returnItem.order_id}</div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         {new Date(returnItem.returned_at).toLocaleDateString()}
@@ -2980,6 +3150,28 @@ const fetchOrderDetails = async (orderId: number) => {
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
               <div>
+                <label className="block text-gray-300 mb-1 text-sm">Peso (gramos)</label>
+                <input
+                  type="number"
+                  value={newProduct.weight_grams || 100}
+                  onChange={(e) => setNewProduct({ ...newProduct, weight_grams: parseFloat(e.target.value) || 100 })}
+                  className="w-full bg-gray-700 border border-gray-600 rounded px-2 sm:px-3 py-1.5 sm:py-2 text-sm"
+                  placeholder="100"
+                  min="0"
+                  step="0.1"
+                />
+              </div>
+              <div>
+                <label className="block text-gray-300 mb-1 text-sm">SKU (modelo principal)</label>
+                <input
+                  type="text"
+                  value={newProduct.sku || ''}
+                  onChange={(e) => setNewProduct({ ...newProduct, sku: e.target.value })}
+                  className="w-full bg-gray-700 border border-gray-600 rounded px-2 sm:px-3 py-1.5 sm:py-2 text-sm"
+                  placeholder="Ej: PROD-001"
+                />
+              </div>
+              <div>
                 <label className="block text-gray-300 mb-1 text-sm">Nombre</label>
                 <input
                   type="text"
@@ -3031,6 +3223,33 @@ const fetchOrderDetails = async (orderId: number) => {
                   placeholder="Oro, plata, etc."
                 />
               </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-gray-300 mb-1">Metal / tipo</label>
+                  <select
+                    value={newProduct.metal_type ?? ''}
+                    onChange={(e) => setNewProduct({ ...newProduct, metal_type: e.target.value ? Number(e.target.value) : null })}
+                    className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
+                  >
+                    <option value="">Ninguno</option>
+                    {(metalTypesList.length ? metalTypesList : metalTypes || []).map((mt: { id: number; name: string }) => (
+                      <option key={mt.id} value={mt.id}>{mt.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-gray-300 mb-1">Quilates (k)</label>
+                  <input
+                    type="number"
+                    min={0}
+                    step={0.5}
+                    value={newProduct.carat ?? ''}
+                    onChange={(e) => setNewProduct({ ...newProduct, carat: e.target.value ? parseFloat(e.target.value) : undefined })}
+                    className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
+                    placeholder="Ej: 14"
+                  />
+                </div>
+              </div>
               <div>
                 <label className="block text-gray-300 mb-1">Stock</label>
                 <input
@@ -3040,6 +3259,38 @@ const fetchOrderDetails = async (orderId: number) => {
                   className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
                   placeholder="0"
                 />
+              </div>
+              {/* Configuración de imágenes: producto base o variante */}
+              <div className="md:col-span-2">
+                <label className="block text-gray-300 mb-2 text-sm font-medium">Configuración de Imágenes</label>
+                <div className="bg-gray-700/50 rounded-lg p-4 space-y-3">
+                  <label className="flex items-start cursor-pointer">
+                    <input
+                      type="radio"
+                      name="newProductImageMode"
+                      checked={newProduct.product_image_mode === 'base'}
+                      onChange={() => setNewProduct({ ...newProduct, product_image_mode: 'base' })}
+                      className="mt-1 mr-2"
+                    />
+                    <div className="flex-1">
+                      <span className="text-sm font-medium text-gray-200">Imágenes para el producto base</span>
+                      <p className="text-xs text-gray-400 mt-0.5">Las imágenes se usarán como imágenes del producto principal (modelo principal las hereda)</p>
+                    </div>
+                  </label>
+                  <label className="flex items-start cursor-pointer">
+                    <input
+                      type="radio"
+                      name="newProductImageMode"
+                      checked={newProduct.product_image_mode === 'variant'}
+                      onChange={() => setNewProduct({ ...newProduct, product_image_mode: 'variant' })}
+                      className="mt-1 mr-2"
+                    />
+                    <div className="flex-1">
+                      <span className="text-sm font-medium text-gray-200">Imágenes propias de la variante</span>
+                      <p className="text-xs text-gray-400 mt-0.5">Las imágenes serán solo del modelo principal (variante default)</p>
+                    </div>
+                  </label>
+                </div>
               </div>
               <div>
                 <label className="block text-gray-300 mb-1">Imagen Principal</label>
@@ -3090,112 +3341,101 @@ const fetchOrderDetails = async (orderId: number) => {
                   </div>
                 )}
               </div>
-              {/* Estado y flags principales */}
-              <div className="md:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="flex flex-col space-y-2">
-                  <span className="text-gray-300 text-sm font-medium">Estado</span>
-                  <div className="flex flex-wrap gap-4">
-                    <label className="flex items-center">
-                      <input
-                        type="checkbox"
-                        checked={newProduct.in_stock || false}
-                        onChange={(e) => setNewProduct({ ...newProduct, in_stock: e.target.checked })}
-                        className="mr-2"
-                      />
-                      En Stock
-                    </label>
-                    <label className="flex items-center">
-                      <input
-                        type="checkbox"
-                        checked={newProduct.is_new || false}
-                        onChange={(e) => setNewProduct({ ...newProduct, is_new: e.target.checked })}
-                        className="mr-2"
-                      />
-                      Nuevo
-                    </label>
-                    <label className="flex items-center">
-                      <input
-                        type="checkbox"
-                        checked={newProduct.is_featured || false}
-                        onChange={(e) => setNewProduct({ ...newProduct, is_featured: e.target.checked })}
-                        className="mr-2"
-                      />
-                      Destacado
-                    </label>
-                  </div>
+              {/* Estado y Envío y valor: una fila cada uno con checkboxes */}
+              <div className="md:col-span-2">
+                <span className="text-gray-300 text-sm font-medium block mb-2">Estado</span>
+                <div className="flex flex-wrap gap-4 mb-4">
+                  <label className="flex items-center">
+                    <input
+                      type="checkbox"
+                      checked={newProduct.in_stock || false}
+                      onChange={(e) => setNewProduct({ ...newProduct, in_stock: e.target.checked })}
+                      className="mr-2"
+                    />
+                    En Stock
+                  </label>
+                  <label className="flex items-center">
+                    <input
+                      type="checkbox"
+                      checked={newProduct.is_new || false}
+                      onChange={(e) => setNewProduct({ ...newProduct, is_new: e.target.checked })}
+                      className="mr-2"
+                    />
+                    Nuevo
+                  </label>
+                  <label className="flex items-center">
+                    <input
+                      type="checkbox"
+                      checked={newProduct.is_featured || false}
+                      onChange={(e) => setNewProduct({ ...newProduct, is_featured: e.target.checked })}
+                      className="mr-2"
+                    />
+                    Destacado
+                  </label>
                 </div>
-                <div className="flex flex-col space-y-2">
-                  <span className="text-gray-300 text-sm font-medium">Envío y valor</span>
-                  <div className="flex flex-wrap gap-4">
-                    <label className="flex items-center opacity-60 cursor-not-allowed">
-                      <input
-                        type="checkbox"
-                        checked={newProduct.is_high_value || false}
-                        disabled
-                        className="mr-2"
-                      />
-                      Alto Valor (determinado automáticamente)
-                    </label>
-                    <label className="flex items-center opacity-60 cursor-not-allowed">
-                      <input
-                        type="checkbox"
-                        checked={newProduct.requires_special_shipping || false}
-                        disabled
-                        className="mr-2"
-                      />
-                      Requiere Envío Especial (determinado automáticamente)
-                    </label>
-                    <label className="flex items-center">
-                      <input
-                        type="checkbox"
-                        checked={newProduct.has_warranty || false}
-                        onChange={(e) => setNewProduct({ ...newProduct, has_warranty: e.target.checked })}
-                        className="mr-2"
-                      />
-                      Tiene Garantía
-                    </label>
-                    
-                  </div>
+                <span className="text-gray-300 text-sm font-medium block mb-2">Envío y valor</span>
+                <div className="flex flex-wrap gap-4">
+                  <label className="flex items-center opacity-60 cursor-not-allowed">
+                    <input
+                      type="checkbox"
+                      checked={newProduct.is_high_value || false}
+                      disabled
+                      className="mr-2"
+                    />
+                    Alto Valor (automático)
+                  </label>
+                  <label className="flex items-center opacity-60 cursor-not-allowed">
+                    <input
+                      type="checkbox"
+                      checked={newProduct.requires_special_shipping || false}
+                      disabled
+                      className="mr-2"
+                    />
+                    Envío Especial (automático)
+                  </label>
+                  <label className="flex items-center">
+                    <input
+                      type="checkbox"
+                      checked={newProduct.has_warranty || false}
+                      onChange={(e) => setNewProduct({ ...newProduct, has_warranty: e.target.checked })}
+                      className="mr-2"
+                    />
+                    Tiene Garantía
+                  </label>
                 </div>
               </div>
-              <div>
-                <label className="block text-gray-300 mb-1">Peso (gramos)</label>
-                <input
-                  type="number"
-                  value={newProduct.weight_grams || 100}
-                  onChange={(e) => setNewProduct({ ...newProduct, weight_grams: parseFloat(e.target.value) || 100 })}
-                  className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
-                  placeholder="100"
-                  min="0"
-                  step="0.1"
-                />
-              </div>
-              {/* Campos de garantía */}
               {newProduct.has_warranty && (
                 <>
-                  <div>
-                    <label className="block text-gray-300 mb-1">Período de Garantía</label>
-                    <input
-                      type="number"
-                      value={newProduct.warranty_period || ''}
-                      onChange={(e) => setNewProduct({ ...newProduct, warranty_period: parseInt(e.target.value) || undefined })}
-                      className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
-                      placeholder="Ej: 12"
-                    />
-                  </div>
                   <div>
                     <label className="block text-gray-300 mb-1">Unidad de Garantía</label>
                     <select
                       value={newProduct.warranty_unit || ''}
-                      onChange={(e) => setNewProduct({ ...newProduct, warranty_unit: e.target.value })}
+                      onChange={(e) => setNewProduct({
+                        ...newProduct,
+                        warranty_unit: e.target.value,
+                        warranty_period: e.target.value === 'lifetime' ? undefined : newProduct.warranty_period
+                      })}
                       className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
                     >
                       <option value="">Seleccionar unidad</option>
+                      <option value="lifetime">De por vida</option>
                       <option value="dias">Días</option>
                       <option value="meses">Meses</option>
                       <option value="años">Años</option>
                     </select>
                   </div>
+                  {newProduct.warranty_unit !== 'lifetime' && (
+                    <div>
+                      <label className="block text-gray-300 mb-1">Período de Garantía</label>
+                      <input
+                        type="number"
+                        value={newProduct.warranty_period || ''}
+                        onChange={(e) => setNewProduct({ ...newProduct, warranty_period: parseInt(e.target.value) || undefined })}
+                        className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
+                        placeholder="Ej: 12"
+                      />
+                    </div>
+                  )}
                 </>
               )}
               <div className="md:col-span-2">
@@ -3385,8 +3625,40 @@ const fetchOrderDetails = async (orderId: number) => {
       {editingProduct && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-gray-800 rounded-lg p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-            <h3 className="text-base sm:text-lg font-bold mb-3 sm:mb-4">Editar Producto</h3>
+            <div className="flex justify-between items-center mb-3 sm:mb-4">
+              <h3 className="text-base sm:text-lg font-bold">Editar Producto</h3>
+              <label className="flex items-center cursor-pointer">
+                <div className="relative">
+                  <input
+                    type="checkbox"
+                    checked={editingProduct.is_active ?? true}
+                    onChange={(e) => setEditingProduct({ ...editingProduct, is_active: e.target.checked })}
+                    className="sr-only"
+                  />
+                  <div className={`block w-14 h-8 rounded-full ${
+                    editingProduct.is_active ?? true ? 'bg-green-500' : 'bg-gray-300'
+                  }`}></div>
+                  <div className={`absolute left-1 top-1 bg-white w-6 h-6 rounded-full transition-transform duration-200 ${
+                    editingProduct.is_active ?? true ? 'transform translate-x-6' : ''
+                  }`}></div>
+                </div>
+                <span className="ml-3 text-gray-300 font-medium">
+                  {editingProduct.is_active ?? true ? 'Activo' : 'Inactivo'}
+                </span>
+              </label>
+            </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
+              
+              <div>
+                <label className="block text-gray-300 mb-1">SKU (modelo principal, solo lectura)</label>
+                <input
+                  type="text"
+                  value={editingProduct.sku ?? ''}
+                  readOnly
+                  className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 opacity-80 cursor-not-allowed"
+                  placeholder="Del modelo principal"
+                />
+              </div>
               <div>
                 <label className="block text-gray-300 mb-1">Nombre</label>
                 <input
@@ -3436,6 +3708,31 @@ const fetchOrderDetails = async (orderId: number) => {
                 />
               </div>
               <div>
+                <label className="block text-gray-300 mb-1">Metal / tipo</label>
+                <select
+                  value={(editingProduct as any).metal_type ?? ''}
+                  onChange={(e) => setEditingProduct({ ...editingProduct, metal_type: e.target.value ? Number(e.target.value) : undefined } as any)}
+                  className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
+                >
+                  <option value="">Ninguno</option>
+                  {(metalTypesList.length ? metalTypesList : metalTypes || []).map((mt: { id: number; name: string }) => (
+                    <option key={mt.id} value={mt.id}>{mt.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-gray-300 mb-1">Quilates (k)</label>
+                <input
+                  type="number"
+                  min={0}
+                  step={0.5}
+                  value={(editingProduct as any).carat ?? ''}
+                  onChange={(e) => setEditingProduct({ ...editingProduct, carat: e.target.value ? parseFloat(e.target.value) : undefined } as any)}
+                  className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
+                  placeholder="Ej: 14"
+                />
+              </div>
+              <div>
                 <label className="block text-gray-300 mb-1">Stock</label>
                 <input
                   type="number"
@@ -3443,6 +3740,23 @@ const fetchOrderDetails = async (orderId: number) => {
                   onChange={(e) => setEditingProduct({ ...editingProduct, stock: parseInt(e.target.value) || 0 })}
                   className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
                 />
+              </div>
+              <div>
+                <label className="block text-gray-300 mb-1">Peso (gramos)</label>
+                <input
+                  type="number"
+                  value={editingProduct.weight_grams || 100}
+                  onChange={(e) => setEditingProduct({ ...editingProduct, weight_grams: parseFloat(e.target.value) || 100 })}
+                  className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
+                  placeholder="100"
+                  min="0"
+                  step="0.1"
+                />
+              </div>
+              {/* Configuración de imágenes (edición): las del producto base o propias de la variante */}
+              <div className="md:col-span-2">
+                <label className="block text-gray-300 mb-2 text-sm font-medium">Configuración de Imágenes</label>
+                <p className="text-xs text-gray-400 mb-2">Las imágenes del producto se gestionan abajo. Para variantes concretas, edita cada variante.</p>
               </div>
               <div>
                 <label className="block text-gray-300 mb-1">Imagen Principal</label>
@@ -3528,120 +3842,101 @@ const fetchOrderDetails = async (orderId: number) => {
                   </div>
                 )}
               </div>
-              {/* Estado y flags principales (edición) */}
-              <div className="md:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="flex flex-col space-y-2">
-                  <span className="text-gray-300 text-sm font-medium">Estado</span>
-                  <div className="flex flex-wrap gap-4">
-                    <label className="flex items-center">
-                      <input
-                        type="checkbox"
-                        checked={editingProduct.in_stock || false}
-                        onChange={(e) => setEditingProduct({ ...editingProduct, in_stock: e.target.checked })}
-                        className="mr-2"
-                      />
-                      En Stock
-                    </label>
-                    <label className="flex items-center">
-                      <input
-                        type="checkbox"
-                        checked={editingProduct.is_new || false}
-                        onChange={(e) => setEditingProduct({ ...editingProduct, is_new: e.target.checked })}
-                        className="mr-2"
-                      />
-                      Nuevo
-                    </label>
-                    <label className="flex items-center">
-                      <input
-                        type="checkbox"
-                        checked={editingProduct.is_featured || false}
-                        onChange={(e) => setEditingProduct({ ...editingProduct, is_featured: e.target.checked })}
-                        className="mr-2"
-                      />
-                      Destacado
-                    </label>
-                  </div>
+              {/* Estado y Envío y valor: una fila cada uno */}
+              <div className="md:col-span-2">
+                <span className="text-gray-300 text-sm font-medium block mb-2">Estado</span>
+                <div className="flex flex-wrap gap-4 mb-4">
+                  <label className="flex items-center">
+                    <input
+                      type="checkbox"
+                      checked={editingProduct.in_stock || false}
+                      onChange={(e) => setEditingProduct({ ...editingProduct, in_stock: e.target.checked })}
+                      className="mr-2"
+                    />
+                    En Stock
+                  </label>
+                  <label className="flex items-center">
+                    <input
+                      type="checkbox"
+                      checked={editingProduct.is_new || false}
+                      onChange={(e) => setEditingProduct({ ...editingProduct, is_new: e.target.checked })}
+                      className="mr-2"
+                    />
+                    Nuevo
+                  </label>
+                  <label className="flex items-center">
+                    <input
+                      type="checkbox"
+                      checked={editingProduct.is_featured || false}
+                      onChange={(e) => setEditingProduct({ ...editingProduct, is_featured: e.target.checked })}
+                      className="mr-2"
+                    />
+                    Destacado
+                  </label>
                 </div>
-                <div className="flex flex-col space-y-2">
-                  <span className="text-gray-300 text-sm font-medium">Envío y valor</span>
-                  <div className="flex flex-wrap gap-4">
-                    <label className="flex items-center opacity-60 cursor-not-allowed">
-                      <input
-                        type="checkbox"
-                        checked={editingProduct.is_high_value || false}
-                        disabled
-                        className="mr-2"
-                      />
-                      Alto Valor (determinado automáticamente)
-                    </label>
-                    <label className="flex items-center opacity-60 cursor-not-allowed">
-                      <input
-                        type="checkbox"
-                        checked={editingProduct.requires_special_shipping || false}
-                        disabled
-                        className="mr-2"
-                      />
-                      Requiere Envío Especial (determinado automáticamente)
-                    </label>
-                    <label className="flex items-center">
-                      <input
-                        type="checkbox"
-                        checked={editingProduct.has_warranty || false}
-                        onChange={(e) => setEditingProduct({ ...editingProduct, has_warranty: e.target.checked })}
-                        className="mr-2"
-                      />
-                      Tiene Garantía
-                    </label>
-                    <label className="flex items-center">
-                      <input
-                        type="checkbox"
-                        checked={editingProduct.is_active ?? true}
-                        onChange={(e) => setEditingProduct({ ...editingProduct, is_active: e.target.checked })}
-                        className="mr-2"
-                      />
-                      Activo
-                    </label>
-                  </div>
+                <span className="text-gray-300 text-sm font-medium block mb-2">Envío y valor</span>
+                <div className="flex flex-wrap gap-4">
+                  <label className="flex items-center opacity-60 cursor-not-allowed">
+                    <input
+                      type="checkbox"
+                      checked={editingProduct.is_high_value || false}
+                      disabled
+                      className="mr-2"
+                    />
+                    Alto Valor (automático)
+                  </label>
+                  <label className="flex items-center opacity-60 cursor-not-allowed">
+                    <input
+                      type="checkbox"
+                      checked={editingProduct.requires_special_shipping || false}
+                      disabled
+                      className="mr-2"
+                    />
+                    Envío Especial (automático)
+                  </label>
+                  <label className="flex items-center">
+                    <input
+                      type="checkbox"
+                      checked={editingProduct.has_warranty || false}
+                      onChange={(e) => setEditingProduct({ ...editingProduct, has_warranty: e.target.checked })}
+                      className="mr-2"
+                    />
+                    Tiene Garantía
+                  </label>
                 </div>
               </div>
-              <div>
-                <label className="block text-gray-300 mb-1">Peso (gramos)</label>
-                <input
-                  type="number"
-                  value={editingProduct.weight_grams || 100}
-                  onChange={(e) => setEditingProduct({ ...editingProduct, weight_grams: parseFloat(e.target.value) || 100 })}
-                  className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
-                  placeholder="100"
-                  min="0"
-                  step="0.1"
-                />
-              </div>
-              {/* Campos de garantía para edición */}
               {editingProduct.has_warranty && (
                 <>
-                  <div>
-                    <label className="block text-gray-300 mb-1">Período de Garantía</label>
-                    <input
-                      type="number"
-                      value={editingProduct.warranty_period || ''}
-                      onChange={(e) => setEditingProduct({ ...editingProduct, warranty_period: parseInt(e.target.value) || undefined })}
-                      className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
-                      placeholder="Ej: 12"
-                    />
-                  </div>
                   <div>
                     <label className="block text-gray-300 mb-1">Unidad de Garantía</label>
                     <select
                       value={editingProduct.warranty_unit || ''}
-                      onChange={(e) => setEditingProduct({ ...editingProduct, warranty_unit: e.target.value })}
+                      onChange={(e) => setEditingProduct({
+                        ...editingProduct,
+                        warranty_unit: e.target.value,
+                        warranty_period: e.target.value === 'lifetime' ? undefined : editingProduct.warranty_period
+                      })}
                       className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
                     >
                       <option value="">Seleccionar unidad</option>
+                      <option value="lifetime">De por vida</option>
                       <option value="dias">Días</option>
                       <option value="meses">Meses</option>
                       <option value="años">Años</option>
                     </select>
                   </div>
+                  {editingProduct.warranty_unit !== 'lifetime' && (
+                    <div>
+                      <label className="block text-gray-300 mb-1">Período de Garantía</label>
+                      <input
+                        type="number"
+                        value={editingProduct.warranty_period || ''}
+                        onChange={(e) => setEditingProduct({ ...editingProduct, warranty_period: parseInt(e.target.value) || undefined })}
+                        className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
+                        placeholder="Ej: 12"
+                      />
+                    </div>
+                  )}
                 </>
               )}
               <div className="md:col-span-2">
@@ -3907,16 +4202,42 @@ const fetchOrderDetails = async (orderId: number) => {
       {showAddVariant.show && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-gray-800 rounded-lg p-6 w-full max-w-md">
-            <h3 className="text-base sm:text-lg font-bold mb-3 sm:mb-4">Agregar Variante</h3>
-            <div className="space-y-3 sm:space-y-4">
-              <div>
-                <label className="block text-gray-300 mb-1">Nombre</label>
+            <div className="flex items-center justify-between mb-3 sm:mb-4">
+              <h3 className="text-base sm:text-lg font-bold">Agregar Variante</h3>
+              <label className="flex items-center cursor-pointer">
                 <input
-                  type="text"
-                  value={newVariant.name}
-                  onChange={(e) => setNewVariant({ ...newVariant, name: e.target.value })}
-                  className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
+                  type="checkbox"
+                  checked={newVariant.is_active ?? true}
+                  onChange={(e) => setNewVariant({ ...newVariant, is_active: e.target.checked })}
+                  className="sr-only"
                 />
+                <div className={`relative inline-block w-14 h-8 rounded-full ${newVariant.is_active ? 'bg-green-500' : 'bg-gray-300'}`}>
+                  <div className={`absolute left-1 top-1 bg-white w-6 h-6 rounded-full transition-transform duration-200 ${newVariant.is_active ? 'transform translate-x-6' : ''}`} />
+                </div>
+                <span className="ml-2 text-gray-300 text-sm">Activo</span>
+              </label>
+            </div>
+            <div className="space-y-3 sm:space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-gray-300 mb-1">SKU</label>
+                  <input
+                    type="text"
+                    value={newVariant.sku || ''}
+                    onChange={(e) => setNewVariant({ ...newVariant, sku: e.target.value })}
+                    className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
+                    placeholder="Ej: VAR-001"
+                  />
+                </div>
+                <div>
+                  <label className="block text-gray-300 mb-1">Nombre</label>
+                  <input
+                    type="text"
+                    value={newVariant.name}
+                    onChange={(e) => setNewVariant({ ...newVariant, name: e.target.value })}
+                    className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
+                  />
+                </div>
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
@@ -3960,39 +4281,174 @@ const fetchOrderDetails = async (orderId: number) => {
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-gray-300 mb-1">Stock</label>
-                  <input
-                    type="number"
-                    value={newVariant.stock}
-                    onChange={(e) => setNewVariant({ ...newVariant, stock: parseInt(e.target.value) || 0 })}
+                  <label className="block text-gray-300 mb-1">Metal / tipo</label>
+                  <select
+                    value={newVariant.metal_type ?? ''}
+                    onChange={(e) => setNewVariant({ ...newVariant, metal_type: e.target.value ? Number(e.target.value) : null })}
                     className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
-                  />
+                  >
+                    <option value="">Ninguno</option>
+                    {(metalTypesList.length ? metalTypesList : metalTypes || []).map((mt: { id: number; name: string }) => (
+                      <option key={mt.id} value={mt.id}>{mt.name}</option>
+                    ))}
+                  </select>
                 </div>
                 <div>
-                  <label className="block text-gray-300 mb-1 text-sm">Imagen Principal</label>
+                  <label className="block text-gray-300 mb-1">Quilates (k)</label>
                   <input
-                    type="file"
-                    accept="image/*"
-                    onChange={async (e) => {
-                      const file = e.target.files && e.target.files[0] ? e.target.files[0] : null;
-                      setNewVariant({ ...newVariant, imageFile: file });
-                      if (file) {
-                        const preview = await createImagePreview(file);
-                        setNewVariantImagePreview(preview);
-                      } else {
-                        setNewVariantImagePreview(null);
-                      }
-                    }}
-                    className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-sm"
+                    type="number"
+                    min={0}
+                    step={0.5}
+                    value={newVariant.carat ?? ''}
+                    onChange={(e) => setNewVariant({ ...newVariant, carat: e.target.value ? parseFloat(e.target.value) : undefined })}
+                    className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
+                    placeholder="Ej: 14"
                   />
-                  {newVariantImagePreview && (
-                    <div className="mt-2">
-                      <img src={newVariantImagePreview} alt="Preview" className="h-24 w-full object-cover rounded-lg border border-gray-700" />
-                    </div>
-                  )}
                 </div>
               </div>
               <div>
+                <label className="block text-gray-300 mb-1">Stock</label>
+                <input
+                  type="number"
+                  value={newVariant.stock}
+                  onChange={(e) => setNewVariant({ ...newVariant, stock: parseInt(e.target.value) || 0 })}
+                  className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
+                />
+              </div>
+              {/* Configuración de imágenes: primero elección, después subida */}
+              <div className="md:col-span-2">
+                <label className="block text-gray-300 mb-2 text-sm font-medium">Configuración de Imágenes</label>
+                <div className="bg-gray-700/50 rounded-lg p-4 space-y-3">
+                  <div>
+                    <label className="flex items-start cursor-pointer">
+                      <input
+                        type="radio"
+                        name="newImageMode"
+                        checked={newVariant.use_product_images === true && newVariant.use_model_images !== true}
+                        onChange={() => setNewVariant({ 
+                          ...newVariant, 
+                          use_product_images: true, 
+                          use_model_images: false,
+                          image_reference_variant_id: null
+                        })}
+                        className="mt-1 mr-2"
+                      />
+                      <div className="flex-1">
+                        <span className="text-sm font-medium text-gray-200">Usar imágenes del producto base</span>
+                        <p className="text-xs text-gray-400 mt-0.5">La variante usará las imágenes del producto principal</p>
+                      </div>
+                    </label>
+                  </div>
+                  
+                  <div>
+                    <label className="flex items-start cursor-pointer">
+                      <input
+                        type="radio"
+                        name="newImageMode"
+                        checked={newVariant.use_product_images !== true && newVariant.use_model_images !== true}
+                        onChange={() => setNewVariant({ 
+                          ...newVariant, 
+                          use_product_images: false, 
+                          use_model_images: false,
+                          image_reference_variant_id: null
+                        })}
+                        className="mt-1 mr-2"
+                      />
+                      <div className="flex-1">
+                        <span className="text-sm font-medium text-gray-200">Usar imágenes propias</span>
+                        <p className="text-xs text-gray-400 mt-0.5">La variante usará sus propias imágenes (subidas arriba)</p>
+                      </div>
+                    </label>
+                  </div>
+                  
+                  <div>
+                    <label className="flex items-start cursor-pointer">
+                      <input
+                        type="radio"
+                        name="newImageMode"
+                        checked={newVariant.use_model_images === true && !newVariant.image_reference_variant_id}
+                        onChange={() => setNewVariant({ 
+                          ...newVariant, 
+                          use_product_images: false, 
+                          use_model_images: true,
+                          image_reference_variant_id: null
+                        })}
+                        className="mt-1 mr-2"
+                      />
+                      <div className="flex-1">
+                        <span className="text-sm font-medium text-gray-200">Usar imágenes de otra variante del mismo modelo</span>
+                        <p className="text-xs text-gray-400 mt-0.5">Buscará automáticamente otra variante del mismo modelo con imágenes</p>
+                      </div>
+                    </label>
+                  </div>
+                  
+                  <div>
+                    <label className="flex items-start cursor-pointer">
+                      <input
+                        type="radio"
+                        name="newImageMode"
+                        checked={newVariant.use_model_images === true && !!newVariant.image_reference_variant_id}
+                        onChange={() => setNewVariant({ 
+                          ...newVariant, 
+                          use_product_images: false, 
+                          use_model_images: true
+                        })}
+                        className="mt-1 mr-2"
+                      />
+                      <div className="flex-1">
+                        <span className="text-sm font-medium text-gray-200">Usar imágenes de otra variante específica</span>
+                        <p className="text-xs text-gray-400 mt-0.5">Selecciona una variante específica de la que heredar imágenes</p>
+                        {newVariant.use_model_images === true && (
+                          <select
+                            value={newVariant.image_reference_variant_id || ''}
+                            onChange={(e) => setNewVariant({ 
+                              ...newVariant, 
+                              image_reference_variant_id: e.target.value ? Number(e.target.value) : null
+                            })}
+                            className="mt-2 w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-sm text-white"
+                          >
+                            <option value="">Seleccionar variante...</option>
+                            {(() => {
+                              const productVariants = variants[showAddVariant.productId || 0] || [];
+                              return productVariants
+                                .filter(v => (v.variant_images?.length ?? 0) > 0 || v.image)
+                                .map(v => (
+                                  <option key={v.id} value={v.id}>
+                                    {v.name} {v.model ? `(${v.model})` : ''} {v.size ? `- ${v.size}` : ''}
+                                  </option>
+                                ));
+                            })()}
+                          </select>
+                        )}
+                      </div>
+                    </label>
+                  </div>
+                </div>
+              </div>
+              <div>
+                <label className="block text-gray-300 mb-1 text-sm">Imagen Principal</label>
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={async (e) => {
+                    const file = e.target.files && e.target.files[0] ? e.target.files[0] : null;
+                    setNewVariant({ ...newVariant, imageFile: file });
+                    if (file) {
+                      const preview = await createImagePreview(file);
+                      setNewVariantImagePreview(preview);
+                    } else {
+                      setNewVariantImagePreview(null);
+                    }
+                  }}
+                  className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-sm"
+                />
+                {newVariantImagePreview && (
+                  <div className="mt-2">
+                    <img src={newVariantImagePreview} alt="Preview" className="h-24 w-full object-cover rounded-lg border border-gray-700" />
+                  </div>
+                )}
+              </div>
+              <div className="md:col-span-2">
                 <label className="block text-gray-300 mb-1 text-sm">Imágenes complementarias</label>
                 <input
                   type="file"
@@ -4018,18 +4474,6 @@ const fetchOrderDetails = async (orderId: number) => {
                   </div>
                 )}
               </div>
-              <div>
-                <label className="block text-gray-300 mb-1 text-sm">Activo</label>
-                <label className="flex items-center">
-                  <input
-                    type="checkbox"
-                    checked={newVariant.is_active ?? true}
-                    onChange={(e) => setNewVariant({ ...newVariant, is_active: e.target.checked })}
-                    className="mr-2"
-                  />
-                  <span className="text-sm text-gray-300">Variante activa para clientes</span>
-                </label>
-              </div>
             </div>
             <div className="flex justify-end space-x-2 mt-6">
               <button
@@ -4038,7 +4482,7 @@ const fetchOrderDetails = async (orderId: number) => {
                   setNewVariantGalleryFiles(null);
                   setNewVariantImagePreview(null);
                   setNewVariantGalleryPreviews([]);
-                  setNewVariant({ name: '', price: 0, original_price: undefined, model: '', size: '', stock: 0, imageFile: null, is_active: true });
+                  setNewVariant({ sku: '', name: '', price: 0, original_price: undefined, model: '', size: '', stock: 0, metal_type: null, carat: undefined, imageFile: null, is_active: true, is_default: false, use_product_images: true, use_model_images: false, image_reference_variant_id: null });
                 }}
                 className="px-4 py-2 bg-gray-600 hover:bg-gray-700 rounded text-sm"
               >
@@ -4059,15 +4503,43 @@ const fetchOrderDetails = async (orderId: number) => {
       {editingVariant && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-gray-800 rounded-lg p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-            <h3 className="text-base sm:text-lg font-bold mb-3 sm:mb-4">Editar Variante</h3>
+            <div className="flex items-center justify-between mb-3 sm:mb-4">
+              <h3 className="text-base sm:text-lg font-bold">Editar Variante</h3>
+              {!editingVariant.is_default && (
+                <label className="flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={editingVariant.is_active ?? true}
+                    onChange={(e) => setEditingVariant({ ...editingVariant, is_active: e.target.checked })}
+                    className="sr-only"
+                  />
+                  <div className={`relative inline-block w-14 h-8 rounded-full ${editingVariant.is_active ?? true ? 'bg-green-500' : 'bg-gray-300'}`}>
+                    <div className={`absolute left-1 top-1 bg-white w-6 h-6 rounded-full transition-transform duration-200 ${editingVariant.is_active ?? true ? 'transform translate-x-6' : ''}`} />
+                  </div>
+                  <span className="ml-2 text-gray-300 text-sm">Activo</span>
+                </label>
+              )}
+            </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
-              <div className="md:col-span-2">
+              <div>
+                <label className="block text-gray-300 mb-1">SKU</label>
+                <input
+                  type="text"
+                  value={editingVariant.sku ?? ''}
+                  onChange={(e) => setEditingVariant({ ...editingVariant, sku: e.target.value })}
+                  className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
+                  placeholder="Ej: VAR-001"
+                  readOnly={!!editingVariant.is_default}
+                />
+              </div>
+              <div>
                 <label className="block text-gray-300 mb-1">Nombre</label>
                 <input
                   type="text"
                   value={editingVariant.name}
                   onChange={(e) => setEditingVariant({ ...editingVariant, name: e.target.value })}
                   className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
+                  readOnly={!!editingVariant.is_default}
                 />
               </div>
               <div>
@@ -4098,7 +4570,8 @@ const fetchOrderDetails = async (orderId: number) => {
                     type="text"
                     value={editingVariant.model || ''}
                     onChange={(e) => setEditingVariant({ ...editingVariant, model: e.target.value })}
-                    className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
+                    className={`w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 ${editingVariant.is_default ? 'cursor-not-allowed opacity-75' : ''}`}
+                    readOnly={!!editingVariant.is_default}
                   />
                 </div>
                 <div>
@@ -4107,7 +4580,35 @@ const fetchOrderDetails = async (orderId: number) => {
                     type="text"
                     value={editingVariant.size || ''}
                     onChange={(e) => setEditingVariant({ ...editingVariant, size: e.target.value })}
+                    className={`w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 ${editingVariant.is_default ? 'cursor-not-allowed opacity-75' : ''}`}
+                    readOnly={!!editingVariant.is_default}
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-gray-300 mb-1">Metal / tipo</label>
+                  <select
+                    value={editingVariant.metal_type ?? ''}
+                    onChange={(e) => setEditingVariant({ ...editingVariant, metal_type: e.target.value ? Number(e.target.value) : null })}
                     className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
+                  >
+                    <option value="">Ninguno</option>
+                    {(metalTypesList.length ? metalTypesList : metalTypes || []).map((mt: { id: number; name: string }) => (
+                      <option key={mt.id} value={mt.id}>{mt.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-gray-300 mb-1">Quilates (k)</label>
+                  <input
+                    type="number"
+                    min={0}
+                    step={0.5}
+                    value={editingVariant.carat ?? ''}
+                    onChange={(e) => setEditingVariant({ ...editingVariant, carat: e.target.value ? parseFloat(e.target.value) : null })}
+                    className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
+                    placeholder="Ej: 14"
                   />
                 </div>
               </div>
@@ -4153,17 +4654,115 @@ const fetchOrderDetails = async (orderId: number) => {
                   )}
                 </div>
               </div>
-              <div>
-                <label className="block text-gray-300 mb-1">Activo</label>
-                <label className="flex items-center">
-                  <input
-                    type="checkbox"
-                    checked={editingVariant.is_active ?? true}
-                    onChange={(e) => setEditingVariant({ ...editingVariant, is_active: e.target.checked })}
-                    className="mr-2"
-                  />
-                  <span className="text-sm text-gray-300">Producto activo para clientes</span>
-                </label>
+              {/* Configuración de herencia de imágenes */}
+              <div className="md:col-span-2">
+                <label className="block text-gray-300 mb-2 text-sm font-medium">Configuración de Imágenes</label>
+                <div className="bg-gray-700/50 rounded-lg p-4 space-y-3">
+                  <div>
+                    <label className="flex items-start cursor-pointer">
+                      <input
+                        type="radio"
+                        name="imageMode"
+                        checked={editingVariant.use_product_images === true && editingVariant.use_model_images !== true}
+                        onChange={() => setEditingVariant({ 
+                          ...editingVariant, 
+                          use_product_images: true, 
+                          use_model_images: false,
+                          image_reference_variant_id: null
+                        })}
+                        className="mt-1 mr-2"
+                      />
+                      <div className="flex-1">
+                        <span className="text-sm font-medium text-gray-200">Usar imágenes del producto base</span>
+                        <p className="text-xs text-gray-400 mt-0.5">La variante usará las imágenes del producto principal</p>
+                      </div>
+                    </label>
+                  </div>
+                  
+                  <div>
+                    <label className="flex items-start cursor-pointer">
+                      <input
+                        type="radio"
+                        name="imageMode"
+                        checked={editingVariant.use_product_images !== true && editingVariant.use_model_images !== true}
+                        onChange={() => setEditingVariant({ 
+                          ...editingVariant, 
+                          use_product_images: false, 
+                          use_model_images: false,
+                          image_reference_variant_id: null
+                        })}
+                        className="mt-1 mr-2"
+                      />
+                      <div className="flex-1">
+                        <span className="text-sm font-medium text-gray-200">Usar imágenes propias</span>
+                        <p className="text-xs text-gray-400 mt-0.5">La variante usará sus propias imágenes (subidas arriba)</p>
+                      </div>
+                    </label>
+                  </div>
+                  
+                  <div>
+                    <label className="flex items-start cursor-pointer">
+                      <input
+                        type="radio"
+                        name="imageMode"
+                        checked={editingVariant.use_model_images === true && !editingVariant.image_reference_variant_id}
+                        onChange={() => setEditingVariant({ 
+                          ...editingVariant, 
+                          use_product_images: false, 
+                          use_model_images: true,
+                          image_reference_variant_id: null
+                        })}
+                        className="mt-1 mr-2"
+                      />
+                      <div className="flex-1">
+                        <span className="text-sm font-medium text-gray-200">Usar imágenes de otra variante del mismo modelo</span>
+                        <p className="text-xs text-gray-400 mt-0.5">Buscará automáticamente otra variante del mismo modelo con imágenes</p>
+                      </div>
+                    </label>
+                  </div>
+                  
+                  <div>
+                    <label className="flex items-start cursor-pointer">
+                      <input
+                        type="radio"
+                        name="imageMode"
+                        checked={editingVariant.use_model_images === true && !!editingVariant.image_reference_variant_id}
+                        onChange={() => setEditingVariant({ 
+                          ...editingVariant, 
+                          use_product_images: false, 
+                          use_model_images: true
+                        })}
+                        className="mt-1 mr-2"
+                      />
+                      <div className="flex-1">
+                        <span className="text-sm font-medium text-gray-200">Usar imágenes de otra variante específica</span>
+                        <p className="text-xs text-gray-400 mt-0.5">Selecciona una variante específica de la que heredar imágenes</p>
+                        {editingVariant.use_model_images === true && !!editingVariant.image_reference_variant_id && (
+                          <select
+                            value={editingVariant.image_reference_variant_id || ''}
+                            onChange={(e) => setEditingVariant({ 
+                              ...editingVariant, 
+                              image_reference_variant_id: e.target.value ? Number(e.target.value) : null
+                            })}
+                            className="mt-2 w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-sm text-white"
+                          >
+                            <option value="">Seleccionar variante...</option>
+                            {(() => {
+                              const productVariants = variants[editingVariant.product_id] || [];
+                              return productVariants
+                                .filter(v => v.id !== editingVariant.id && ((v.variant_images?.length ?? 0) > 0 || v.image))
+                                .map(v => (
+                                  <option key={v.id} value={v.id}>
+                                    {v.name} {v.model ? `(${v.model})` : ''} {v.size ? `- ${v.size}` : ''}
+                                  </option>
+                                ));
+                            })()}
+                          </select>
+                        )}
+                      </div>
+                    </label>
+                  </div>
+                </div>
               </div>
               <div className="md:col-span-2 space-y-2">
                 <label className="block text-gray-300 mb-1">Imágenes complementarias</label>
@@ -4404,7 +5003,7 @@ const fetchOrderDetails = async (orderId: number) => {
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-gray-800 rounded-lg p-6 w-full max-w-4xl max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between mb-6">
-              <h3 className="text-xl font-bold text-white">Detalles de la Orden #{orderDetails.order_id}</h3>
+              <h3 className="text-xl font-bold text-white">Detalles de la Orden #{orderDetails.order_number || orderDetails.order_id}</h3>
               <button
                 onClick={() => setShowOrderDetails({ show: false, orderId: null })}
                 className="text-gray-400 hover:text-white"
@@ -4420,7 +5019,7 @@ const fetchOrderDetails = async (orderId: number) => {
                 <div className="bg-gray-700 rounded-lg p-4 space-y-2">
                   <div className="flex justify-between">
                     <span className="text-gray-300">Estado:</span>
-                    <span className="text-white font-medium">{orderDetails.status}</span>
+                    <span className="text-white font-medium capitalize">{orderDetails.status ? orderDetails.status.charAt(0).toUpperCase() + orderDetails.status.slice(1).toLowerCase() : orderDetails.status}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-gray-300">Total:</span>
@@ -4497,8 +5096,14 @@ const fetchOrderDetails = async (orderId: number) => {
                         >
                           {it.product?.name || `Producto ${it.product_id}`}
                         </a>
-                        <p className="text-gray-400 text-xs">ID: {it.product_id}</p>
-                        {it.variant && <p className="text-gray-300 text-xs">Variante: {it.variant.name} (ID: {it.variant_id})</p>}
+                        <p className="text-gray-400 text-xs">SKU: {it.product?.sku || it.product_id}</p>
+                        {it.variant && (
+                          <p className="text-gray-300 text-xs">
+                            {it.variant.model ? `Modelo: ${it.variant.model}` : 'Principal'}
+                            {it.variant.size && ` - Talla: ${it.variant.size}`}
+                            {it.variant_id && ` (ID: ${it.variant_id})`}
+                          </p>
+                        )}
                       </div>
                     </div>
                     <div className="text-gray-300 text-sm">x{it.quantity} · ${it.price}</div>
@@ -4528,31 +5133,15 @@ const fetchOrderDetails = async (orderId: number) => {
         </div>
       )}
 
-      {/* Modal para elegir paquetería y crear/procesar etiquetas */}
+      {/* Modal para crear/procesar etiquetas (siempre paquetería de cada orden) */}
       {showCourierModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-gray-800 rounded-lg p-6 w-full max-w-md">
             <h3 className="text-lg font-bold mb-4">Generar etiquetas de envío</h3>
             <p className="text-sm text-gray-300 mb-3">
-              Seleccionaste {selectedOrderIds.length} orden(es). Primero crearemos las etiquetas y luego las procesaremos.
+              Seleccionaste {selectedOrderIds.length} orden(es). Se creará la etiqueta y se generará la guía con la paquetería asignada a cada orden.
             </p>
             <div className="space-y-3">
-              <label className="block text-gray-300 text-sm">Paquetería</label>
-              <select
-                value={selectedCourierIdForLabels === '' ? '' : String(selectedCourierIdForLabels)}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  setSelectedCourierIdForLabels(val === '' ? '' : Number(val));
-                }}
-                className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white"
-                disabled={processingShipping}
-              >
-                <option value="">Seleccionar (usar por defecto)</option>
-                {couriers.map(c => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
-                ))}
-              </select>
-              <p className="text-xs text-gray-400">Si no seleccionas, se usará el courier por defecto configurado en la API.</p>
               <label className="block text-gray-300 text-sm">Paquete de envío</label>
               <select
                 value={selectedPackageIdForLabels === '' ? '' : String(selectedPackageIdForLabels)}

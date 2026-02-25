@@ -14,7 +14,6 @@ const Success: React.FC = () => {
     const clearCartAndShow = async () => {
       try {
         await clearCart();
-        console.log('Carrito limpiado después de compra exitosa');
       } catch (error) {
         console.error('Error limpiando carrito:', error);
       }

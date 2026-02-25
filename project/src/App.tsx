@@ -129,7 +129,6 @@ function App() {
   };
 
   const handleAuthRequired = () => {
-    console.log('Autenticación requerida - abriendo modal');
     openAuth();
   };
 
@@ -182,8 +181,8 @@ function App() {
   // Loading state simple
   if (authLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-lg">Cargando...</div>
+      <div className="min-h-screen bg-gradient-to-b from-black via-gray-900 to-black flex items-center justify-center">
+        <div className="text-white text-lg">Cargando...</div>
       </div>
     );
   }

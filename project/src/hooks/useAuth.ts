@@ -18,15 +18,12 @@ export const useAuth = () => {
     if (!mountedRef.current) return 'customer';
 
     try {
-      console.log('🔄 Cargando rol para:', userId);
-      
       // PRIMERO intentar desde cache (a menos que forceRefresh sea true)
       const cacheKey = `user_role_${userId}`;
       
       if (!forceRefresh) {
         const cachedRole = localStorage.getItem(cacheKey);
         if (cachedRole) {
-          console.log('📦 Rol desde cache:', cachedRole);
           return cachedRole as UserRole;
         }
       }
@@ -44,8 +41,7 @@ export const useAuth = () => {
       }
 
       const userRole = (data?.role as UserRole) || 'customer';
-      console.log('✅ Rol desde BD:', userRole);
-      
+
       // Guardar en cache
       localStorage.setItem(cacheKey, userRole);
       
@@ -60,15 +56,12 @@ export const useAuth = () => {
   const clearUserRoleCache = (userId: string) => {
     const cacheKey = `user_role_${userId}`;
     localStorage.removeItem(cacheKey);
-    console.log('🧹 Cache limpiado para usuario:', userId);
   };
 
   // --------------- UPDATE USER ----------------
   const updateUser = useCallback(async (supabaseUser: SupabaseUser | null, forceRefresh = false) => {
-    if (!mountedRef.current) return;
-
     if (!supabaseUser) {
-      setUser(null);
+      if (mountedRef.current) setUser(null);
       setLoading(false);
       return;
     }
@@ -76,37 +69,31 @@ export const useAuth = () => {
     try {
       const userRole = await loadUserRole(supabaseUser.id, forceRefresh);
 
-      const authUser: AuthUser = {
-        id: supabaseUser.id,
-        name: supabaseUser.user_metadata?.name || supabaseUser.email?.split('@')[0] || 'Usuario',
-        email: supabaseUser.email || '',
-        created_at: supabaseUser.created_at,
-        role: userRole,
-      };
-
-      console.log('✅ Usuario actualizado:', { 
-        id: authUser.id, 
-        name: authUser.name, 
-        role: authUser.role 
-      });
-      
-      setUser(authUser);
+      if (mountedRef.current) {
+        const authUser: AuthUser = {
+          id: supabaseUser.id,
+          name: supabaseUser.user_metadata?.name || supabaseUser.email?.split('@')[0] || 'Usuario',
+          email: supabaseUser.email || '',
+          created_at: supabaseUser.created_at,
+          role: userRole,
+        };
+        setUser(authUser);
+      }
 
     } catch (error) {
       console.error('💥 Error en updateUser:', error);
-      // Fallback seguro
-      const fallbackUser: AuthUser = {
-        id: supabaseUser.id,
-        name: supabaseUser.user_metadata?.name || supabaseUser.email?.split('@')[0] || 'Usuario',
-        email: supabaseUser.email || '',
-        created_at: supabaseUser.created_at,
-        role: 'customer',
-      };
-      setUser(fallbackUser);
-    } finally {
       if (mountedRef.current) {
-        setLoading(false);
+        const fallbackUser: AuthUser = {
+          id: supabaseUser.id,
+          name: supabaseUser.user_metadata?.name || supabaseUser.email?.split('@')[0] || 'Usuario',
+          email: supabaseUser.email || '',
+          created_at: supabaseUser.created_at,
+          role: 'customer',
+        };
+        setUser(fallbackUser);
       }
+    } finally {
+      setLoading(false);
     }
   }, [loadUserRole]);
 
@@ -117,8 +104,6 @@ export const useAuth = () => {
       supabase.removeChannel(roleChannelRef.current);
       roleChannelRef.current = null;
     }
-
-    console.log('🔗 Configurando suscripción de rol para:', userId);
 
     // Suscribirse a cambios en user_roles para este usuario
     const channel = supabase
@@ -132,12 +117,9 @@ export const useAuth = () => {
           filter: `user_id=eq.${userId}`
         },
         async (payload) => {
-          console.log('🔄 Cambio de rol detectado:', payload);
-          
           if (!mountedRef.current) return;
 
           const newRole = payload.new.role as UserRole;
-          console.log('🎯 Nuevo rol recibido:', newRole);
 
           // Actualizar cache
           localStorage.setItem(`user_role_${userId}`, newRole);
@@ -147,13 +129,9 @@ export const useAuth = () => {
             if (!prev || prev.id !== userId) return prev;
             return { ...prev, role: newRole };
           });
-
-          console.log('✅ Rol actualizado en tiempo real');
         }
       )
-      .subscribe((status) => {
-        console.log('📡 Estado suscripción rol:', status);
-      });
+      .subscribe();
 
     roleChannelRef.current = channel;
   }, []);
@@ -164,24 +142,18 @@ export const useAuth = () => {
 
     const initializeAuth = async () => {
       try {
-        console.log('🔧 Inicializando auth...');
         const { data: { session }, error } = await supabase.auth.getSession();
         
         if (error) {
           console.error('❌ Error obteniendo sesión:', error);
+          setLoading(false);
           return;
         }
 
-        console.log('📋 Sesión:', session ? 'con usuario' : 'sin usuario');
-        
-        if (mountedRef.current) {
-          await updateUser(session?.user || null);
-        }
+        await updateUser(session?.user || null);
       } catch (error) {
         console.error('💥 Error inicializando auth:', error);
-        if (mountedRef.current) {
-          setLoading(false);
-        }
+        setLoading(false);
       }
     };
 
@@ -189,10 +161,8 @@ export const useAuth = () => {
 
     // Suscripción a cambios de auth
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
+      async (_event, session) => {
         if (!mountedRef.current) return;
-        
-        console.log('🔄 Cambio de estado auth:', event);
         await updateUser(session?.user || null);
       }
     );
@@ -262,6 +232,30 @@ export const useAuth = () => {
         options: { data: { name } },
       });
       if (error) throw error;
+      
+      // Registrar correo y nombre en user_profiles
+      if (data?.user?.id) {
+        try {
+          const { error: profileError } = await supabase
+            .from('user_profiles')
+            .upsert({
+              user_id: data.user.id,
+              email: email,
+              name: name,
+              updated_at: new Date().toISOString()
+            }, {
+              onConflict: 'user_id'
+            });
+          
+          if (profileError) {
+            console.warn('⚠️ Error guardando perfil de usuario:', profileError);
+          }
+        } catch (profileErr) {
+          console.warn('⚠️ Error al crear perfil de usuario:', profileErr);
+          // No lanzar error, solo loguear
+        }
+      }
+      
       setIsAuthOpen(false);
     } catch (error: any) {
       console.error('❌ Error en registro:', error);
@@ -309,8 +303,6 @@ export const useAuth = () => {
   // --------------- ROLE MANAGEMENT ----------------
   const assignRole = async (userId: string, role: UserRole) => {
     try {
-      console.log(`🎯 Asignando rol ${role} a usuario ${userId}`);
-      
       const { error } = await supabase
         .from('user_roles')
         .upsert({ user_id: userId, role });
@@ -320,10 +312,7 @@ export const useAuth = () => {
         return false;
       }
 
-      // ✅ LIMPIAR CACHE del usuario afectado para forzar recarga
       clearUserRoleCache(userId);
-      
-      console.log('✅ Rol asignado exitosamente - Cache limpiado');
       return true;
     } catch (error) {
       console.error('❌ Error asignando rol:', error);
@@ -334,8 +323,6 @@ export const useAuth = () => {
   // --------------- FORZAR ACTUALIZACIÓN DE OTRO USUARIO ----------------
   const refreshUserRole = async (userId: string): Promise<UserRole> => {
     try {
-      console.log(`🔄 Forzando actualización de rol para usuario: ${userId}`);
-      
       // Limpiar cache y recargar
       clearUserRoleCache(userId);
       const newRole = await loadUserRole(userId, true);

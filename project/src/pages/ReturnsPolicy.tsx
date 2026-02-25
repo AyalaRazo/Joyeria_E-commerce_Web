@@ -27,10 +27,10 @@ const ReturnsPolicy: React.FC = () => (
       <section className="bg-gray-900/60 border border-gray-800 rounded-2xl p-6 space-y-3">
         <h2 className="text-2xl font-semibold text-white">Pasos</h2>
         <ol className="list-decimal list-inside space-y-2 text-gray-300">
-          <li>Ingresa a tu cuenta y selecciona la orden.</li>
-          <li>Describe el motivo y adjunta fotografías opcionales.</li>
+          <li>Envianos un correo a <a className="text-yellow-400" href="mailto:devoluciones@empresa.com">devoluciones@empresa.com</a> con el numero de pedido y el motivo de la devolucion, adjunta fotografias si es posible.</li>
+          <li>Espera nuestro proceso y confirmacion de devolucion.</li>
           <li>Recibirás una guía de devolución y seguimiento por correo.</li>
-        </ol>
+        </ol> 
       </section>
     </div>
   </div>

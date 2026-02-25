@@ -8,7 +8,6 @@ import OrderCard from './OrderCard';
 const OrdersPage: React.FC = () => {
   const { user } = useAuth();
   const { orders, loading, error, loadOrders } = useOrders();
-  const [selectedOrder, setSelectedOrder] = useState<number | null>(null);
   const [dateFilter, setDateFilter] = useState<{
     startDate: string;
     endDate: string;
@@ -18,6 +17,7 @@ const OrdersPage: React.FC = () => {
   });
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [submittedFilter, setSubmittedFilter] = useState<string>('all');
+  const [quickFilter, setQuickFilter] = useState<string>('all'); // 'all', 'month-X', 'year-YYYY'
   const [pagination, setPagination] = useState({
     page: 1,
     limit: 10
@@ -114,6 +114,8 @@ const OrdersPage: React.FC = () => {
     switch (status) {
       case 'pendiente':
         return 'Pendiente';
+      case 'pagado':
+        return 'Pagado';
       case 'procesando':
         return 'Procesando';
       case 'enviado':
@@ -124,8 +126,10 @@ const OrdersPage: React.FC = () => {
         return 'Cancelado';
       case 'reembolsado':
         return 'Reembolsado';
+      case 'devuelto':
+        return 'Devuelto';
       default:
-        return status;
+        return status ? status.charAt(0).toUpperCase() + status.slice(1).toLowerCase() : status;
     }
   };
 
@@ -148,6 +152,14 @@ const OrdersPage: React.FC = () => {
     }
   };
 
+  // Obtener año de creación de cuenta del usuario
+  const userCreatedYear = user?.created_at ? new Date(user.created_at).getFullYear() : new Date().getFullYear();
+  const currentYear = new Date().getFullYear();
+  const currentMonth = new Date().getMonth() + 1; // 1-12
+
+  // Generar años disponibles (desde creación de cuenta hasta año actual)
+  const availableYears = Array.from({ length: currentYear - userCreatedYear + 1 }, (_, i) => currentYear - i);
+
   const filteredOrders = orders.filter(order => {
     const matchesStatus = statusFilter === 'all' || order.status === statusFilter;
     const matchesSubmitted = submittedFilter === 'all' ||
@@ -155,8 +167,21 @@ const OrdersPage: React.FC = () => {
       (submittedFilter === 'not_submitted' && !order.is_submitted);
     
     let matchesDate = true;
+    const orderDate = new Date(order.created_at || new Date().toISOString());
+    
+    // Aplicar filtro rápido
+    if (quickFilter !== 'all') {
+      if (quickFilter.startsWith('month-')) {
+        const month = parseInt(quickFilter.split('-')[1]);
+        matchesDate = orderDate.getFullYear() === currentYear && orderDate.getMonth() + 1 === month;
+      } else if (quickFilter.startsWith('year-')) {
+        const year = parseInt(quickFilter.split('-')[1]);
+        matchesDate = orderDate.getFullYear() === year;
+      }
+    }
+    
+    // Aplicar filtro de fecha manual
     if (dateFilter.startDate || dateFilter.endDate) {
-      const orderDate = new Date(order.created_at || new Date().toISOString());
       if (dateFilter.startDate) {
         const startDate = new Date(dateFilter.startDate);
         matchesDate = matchesDate && orderDate >= startDate;
@@ -171,15 +196,83 @@ const OrdersPage: React.FC = () => {
     return matchesStatus && matchesSubmitted && matchesDate;
   });
 
+  // Agrupar órdenes por fecha para mostrar separadores
+  const groupOrdersByDate = (ordersList: typeof filteredOrders) => {
+    const groups: { label: string; orders: typeof filteredOrders; type: 'year' | 'month' | 'week' | 'today' }[] = [];
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    
+    // Separar por hoy, esta semana, este mes, este año, y años anteriores
+    const todayOrders: typeof filteredOrders = [];
+    const thisWeekOrders: typeof filteredOrders = [];
+    const thisMonthOrders: typeof filteredOrders = [];
+    const thisYearOrders: typeof filteredOrders = [];
+    const otherYears: Record<number, typeof filteredOrders> = {};
+    
+    ordersList.forEach(order => {
+      const orderDate = new Date(order.created_at || new Date().toISOString());
+      const orderDateOnly = new Date(orderDate.getFullYear(), orderDate.getMonth(), orderDate.getDate());
+      
+      // Hoy
+      if (orderDateOnly.getTime() === today.getTime()) {
+        todayOrders.push(order);
+      }
+      // Esta semana (últimos 7 días)
+      else if (orderDateOnly >= new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000)) {
+        thisWeekOrders.push(order);
+      }
+      // Este mes
+      else if (orderDate.getFullYear() === now.getFullYear() && orderDate.getMonth() === now.getMonth()) {
+        thisMonthOrders.push(order);
+      }
+      // Este año
+      else if (orderDate.getFullYear() === now.getFullYear()) {
+        thisYearOrders.push(order);
+      }
+      // Otros años
+      else {
+        const year = orderDate.getFullYear();
+        if (!otherYears[year]) {
+          otherYears[year] = [];
+        }
+        otherYears[year].push(order);
+      }
+    });
+    
+    if (todayOrders.length > 0) {
+      groups.push({ label: 'Hoy', orders: todayOrders, type: 'today' });
+    }
+    if (thisWeekOrders.length > 0) {
+      groups.push({ label: 'Esta Semana', orders: thisWeekOrders, type: 'week' });
+    }
+    if (thisMonthOrders.length > 0) {
+      groups.push({ label: 'Este Mes', orders: thisMonthOrders, type: 'month' });
+    }
+    if (thisYearOrders.length > 0) {
+      groups.push({ label: `${now.getFullYear()}`, orders: thisYearOrders, type: 'year' });
+    }
+    
+    // Agregar años anteriores ordenados
+    Object.keys(otherYears)
+      .map(Number)
+      .sort((a, b) => b - a)
+      .forEach(year => {
+        groups.push({ label: `${year}`, orders: otherYears[year], type: 'year' });
+      });
+    
+    return groups;
+  };
+  
+  const groupedOrders = groupOrdersByDate(filteredOrders);
+
   useEffect(() => {
     setPagination(prev => ({ ...prev, page: 1 }));
-  }, [statusFilter, submittedFilter, dateFilter.startDate, dateFilter.endDate]);
+  }, [statusFilter, submittedFilter, dateFilter.startDate, dateFilter.endDate, quickFilter]);
 
   const totalFiltered = filteredOrders.length;
   const totalPages = Math.max(1, Math.ceil(totalFiltered / pagination.limit));
   const startIndex = (pagination.page - 1) * pagination.limit;
   const endIndex = startIndex + pagination.limit;
-  const paginatedOrders = filteredOrders.slice(startIndex, endIndex);
 
   if (loading) {
     return (
@@ -227,62 +320,89 @@ const OrdersPage: React.FC = () => {
           </p>
           
           {/* Filtros */}
-          <div className="flex flex-col sm:flex-row gap-3 mb-4">
-            <div className="flex items-center space-x-2">
-              <label className="text-white text-xs">Estado:</label>
-              <select
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value)}
-                className="bg-gray-800 border border-gray-700 rounded px-2.5 py-1.5 text-xs text-white focus:ring-1 focus:ring-yellow-400"
-              >
-                <option value="all">Todos</option>
-                <option value="pendiente">Pendiente</option>
-                <option value="pagado">Pagado</option>
-                <option value="procesando">Procesando</option>
-                <option value="enviado">Enviado</option>
-                <option value="entregado">Entregado</option>
-                <option value="cancelado">Cancelado</option>
-                <option value="reembolsado">Reembolsado</option>
-              </select>
+          <div className="flex flex-col gap-3 mb-4">
+            <div className="flex flex-col sm:flex-row gap-3">
+              <div className="flex items-center space-x-2">
+                <label className="text-white text-xs">Estado:</label>
+                <select
+                  value={statusFilter}
+                  onChange={(e) => setStatusFilter(e.target.value)}
+                  className="bg-gray-800 border border-gray-700 rounded px-2.5 py-1.5 text-xs text-white focus:ring-1 focus:ring-yellow-400"
+                >
+                  <option value="all">Todos</option>
+                  <option value="pendiente">Pendiente</option>
+                  <option value="pagado">Pagado</option>
+                  <option value="procesando">Procesando</option>
+                  <option value="enviado">Enviado</option>
+                  <option value="entregado">Entregado</option>
+                  <option value="cancelado">Cancelado</option>
+                  <option value="reembolsado">Reembolsado</option>
+                </select>
+              </div>
+              
+              {/* Contenedor para filtros de mes y año - Alineado a la derecha */}
+              <div className="flex items-center space-x-2 ml-auto">
+                {/* Filtros rápidos por mes */}
+                <div className="flex items-center space-x-2">
+                  <label className="text-white text-xs">Mes {currentYear}:</label>
+                  <select
+                    value={quickFilter.startsWith('month-') ? quickFilter : 'all'}
+                    onChange={(e) => {
+                      setQuickFilter(e.target.value);
+                      setDateFilter({startDate: '', endDate: ''});
+                    }}
+                    className="bg-gray-800 border border-gray-700 rounded px-2.5 py-1.5 text-xs text-white focus:ring-1 focus:ring-yellow-400"
+                  >
+                    <option value="all">Todos los meses</option>
+                    {Array.from({ length: currentMonth }, (_, i) => i + 1).map(month => {
+                      const monthNames = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+                      return (
+                        <option key={month} value={`month-${month}`}>
+                          {monthNames[month - 1]}
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
+                
+                {/* Filtros rápidos por año */}
+                <div className="flex items-center space-x-2">
+                  <label className="text-white text-xs">Año:</label>
+                  <select
+                    value={quickFilter.startsWith('year-') ? quickFilter : 'all'}
+                    onChange={(e) => {
+                      setQuickFilter(e.target.value);
+                      setDateFilter({startDate: '', endDate: ''});
+                    }}
+                    className="bg-gray-800 border border-gray-700 rounded px-2.5 py-1.5 text-xs text-white focus:ring-1 focus:ring-yellow-400"
+                  >
+                    <option value="all">Todos los años</option>
+                    {availableYears.map(year => (
+                      <option key={year} value={`year-${year}`}>
+                        {year}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              
+              {/* Botón de limpiar - Se mantiene a la derecha después de los filtros */}
+              {(dateFilter.startDate || dateFilter.endDate || statusFilter !== 'all' || submittedFilter !== 'all' || quickFilter !== 'all') && (
+                <button
+                  onClick={() => {
+                    setDateFilter({startDate: '', endDate: ''});
+                    setStatusFilter('all');
+                    setSubmittedFilter('all');
+                    setQuickFilter('all');
+                  }}
+                  className="text-red-400 hover:text-red-300 text-xs flex items-center space-x-1"
+                  title="Limpiar filtros"
+                >
+                  <XCircle className="h-3 w-3" />
+                  <span>Limpiar</span>
+                </button>
+              )}
             </div>
-            
-            
-            <div className="flex items-center space-x-1.5">
-              <label className="text-white text-xs">Desde:</label>
-              <input
-                type="date"
-                value={dateFilter.startDate}
-                onChange={(e) => setDateFilter({...dateFilter, startDate: e.target.value})}
-                className="bg-gray-800 border border-gray-700 rounded px-2.5 py-1.5 text-xs text-white focus:ring-1 focus:ring-yellow-400 w-32"
-                title="Fecha de inicio"
-              />
-            </div>
-            
-            <div className="flex items-center space-x-1.5">
-              <label className="text-white text-xs">Hasta:</label>
-              <input
-                type="date"
-                value={dateFilter.endDate}
-                onChange={(e) => setDateFilter({...dateFilter, endDate: e.target.value})}
-                className="bg-gray-800 border border-gray-700 rounded px-2.5 py-1.5 text-xs text-white focus:ring-1 focus:ring-yellow-400 w-32"
-                title="Fecha de fin"
-              />
-            </div>
-            
-            {(dateFilter.startDate || dateFilter.endDate || statusFilter !== 'all' || submittedFilter !== 'all') && (
-              <button
-                onClick={() => {
-                  setDateFilter({startDate: '', endDate: ''});
-                  setStatusFilter('all');
-                  setSubmittedFilter('all');
-                }}
-                className="text-red-400 hover:text-red-300 text-xs flex items-center space-x-1"
-                title="Limpiar filtros"
-              >
-                <XCircle className="h-3 w-3" />
-                <span>Limpiar</span>
-              </button>
-            )}
           </div>
         </div>
 
@@ -303,16 +423,28 @@ const OrdersPage: React.FC = () => {
             </a>
           </div>
         ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {paginatedOrders.map((order) => {
-              const courier = couriers.find(c => c.id === order.courier_id);
-              const trackingUrl = courier?.url && order.tracking_code ? `${courier.url}${order.tracking_code}` : null;
-              
-              return (
-                <div
-                  key={order.id}
-                  className="bg-gradient-to-br from-gray-800/60 to-gray-900/60 border border-gray-700 rounded-lg overflow-hidden hover:border-yellow-400/50 transition-all duration-200 shadow hover:shadow-lg flex flex-col h-full"
-                >
+          <div className="space-y-6">
+            {groupedOrders.map((group, groupIndex) => (
+              <div key={groupIndex} className="space-y-4">
+                {/* Separador de fecha */}
+                <div className="flex items-center space-x-3">
+                  <div className="flex-1 border-t border-gray-700"></div>
+                  <h2 className="text-lg font-bold text-gray-300 px-4">
+                    {group.label}
+                  </h2>
+                  <div className="flex-1 border-t border-gray-700"></div>
+                </div>
+                
+                {/* Órdenes del grupo */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                  {group.orders.map((order) => {
+                    const courier = couriers.find(c => c.id === order.courier_id);
+                    
+                    return (
+                      <div
+                        key={order.id}
+                        className="bg-gradient-to-br from-gray-800/60 to-gray-900/60 border border-gray-700 rounded-lg overflow-hidden hover:border-yellow-400/50 transition-all duration-200 shadow hover:shadow-lg flex flex-col h-full"
+                      >
                   {/* Order Header - más compacto */}
                   <div className="p-3 border-b border-gray-700 bg-gradient-to-r from-gray-800/30 to-gray-900/30 flex-1">
                     <div className="mb-2">
@@ -320,7 +452,7 @@ const OrdersPage: React.FC = () => {
                         <div className="flex items-center space-x-2">
                           {getStatusIcon(order.status)}
                           <span className="text-base font-bold text-white">
-                            Pedido #{order.id}
+                            Pedido #{order.order_number || order.id}
                           </span>
                         </div>
                         <span className={`px-2 py-1 rounded-full text-xs font-medium border ${getStatusColor(order.status)}`}>
@@ -343,7 +475,7 @@ const OrdersPage: React.FC = () => {
 
                     {/* Información de envío compacta */}
                     {(courier || order.tracking_code) && (
-                      <div className="mt-2 pt-2 border-t border-gray-600/50">
+                      <div className="mt-2 pt-2 border-gray-600/50">
                         <div className="flex items-center justify-between">
                           <div className="flex items-center space-x-1.5">
                             <Truck className="h-3.5 w-3.5 text-blue-400" />
@@ -359,9 +491,10 @@ const OrdersPage: React.FC = () => {
                             </div>
                           </div>
                           
-                          {trackingUrl && (
+                          {/* Solo URL de la paquetería + código (nunca URL de nuestra web) */}
+                          {order.tracking_code && courier?.url && (
                             <a
-                              href={trackingUrl}
+                              href={`${courier.url}${order.tracking_code}`}
                               target="_blank"
                               rel="noopener noreferrer"
                               className="inline-flex items-center space-x-1 px-2 py-1 bg-yellow-500 hover:bg-yellow-600 text-black rounded text-xs transition-colors"
@@ -393,57 +526,126 @@ const OrdersPage: React.FC = () => {
                     
                     {/* OrderCard más compacto o resumen */}
                     <div className="text-xs text-gray-300">
-                      <OrderCard order={order} compact={true} />
+                      <OrderCard order={order} compact={false} />
                     </div>
                   </div>
                 </div>
-              );
-            })}
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
           </div>
         )}
         
         {/* Paginación */}
-        {totalFiltered > 0 && totalPages > 1 && (
-          <div className="flex items-center justify-between mt-4 px-4 py-2.5 bg-gray-800/50 border border-gray-700 rounded">
-            <div className="text-xs text-gray-400">
-              {startIndex + 1} - {Math.min(endIndex, totalFiltered)} de {totalFiltered}
-            </div>
-            <div className="flex items-center space-x-1.5">
-              <button
-                onClick={() => {
-                  setPagination(prev => ({ ...prev, page: prev.page - 1 }));
-                  window.scrollTo(0, 0);
-                }}
-                disabled={pagination.page <= 1}
-                className="px-2.5 py-1 bg-gray-600 hover:bg-gray-500 disabled:opacity-50 disabled:cursor-not-allowed rounded text-xs"
-              >
-                Anterior
-              </button>
+        {totalFiltered > 0 && totalPages > 1 && (() => {
+          const getPageNumbers = () => {
+            const pages: (number | string)[] = [];
+            const maxVisible = 5;
+            
+            if (totalPages <= maxVisible) {
+              for (let i = 1; i <= totalPages; i++) {
+                pages.push(i);
+              }
+            } else {
+              pages.push(1);
+              let start = Math.max(2, pagination.page - 1);
+              let end = Math.min(totalPages - 1, pagination.page + 1);
               
-              <span className="text-xs text-gray-300">
-                {pagination.page} / {totalPages}
-              </span>
+              if (pagination.page <= 3) {
+                end = Math.min(4, totalPages - 1);
+              }
               
-              <button
-                onClick={() => {
-                  setPagination(prev => ({ ...prev, page: prev.page + 1 }));
-                  window.scrollTo(0, 0);
-                }}
-                disabled={pagination.page >= totalPages}
-                className="px-2.5 py-1 bg-gray-600 hover:bg-gray-500 disabled:opacity-50 disabled:cursor-not-allowed rounded text-xs"
-              >
-                Siguiente
-              </button>
+              if (pagination.page >= totalPages - 2) {
+                start = Math.max(2, totalPages - 3);
+              }
+              
+              if (start > 2) {
+                pages.push('...');
+              }
+              
+              for (let i = start; i <= end; i++) {
+                pages.push(i);
+              }
+              
+              if (end < totalPages - 1) {
+                pages.push('...');
+              }
+              
+              pages.push(totalPages);
+            }
+            
+            return pages;
+          };
+
+          return (
+            <div className="flex items-center justify-between mt-4 px-4 py-2.5 bg-gray-800/50 border border-gray-700 rounded">
+              <div className="text-xs text-gray-400">
+                {startIndex + 1} - {Math.min(endIndex, totalFiltered)} de {totalFiltered}
+              </div>
+              <div className="flex items-center space-x-1.5">
+                <button
+                  onClick={() => {
+                    setPagination(prev => ({ ...prev, page: prev.page - 1 }));
+                    window.scrollTo(0, 0);
+                  }}
+                  disabled={pagination.page <= 1}
+                  className="px-2.5 py-1 bg-gray-600 hover:bg-gray-500 disabled:opacity-50 disabled:cursor-not-allowed rounded text-xs"
+                >
+                  Anterior
+                </button>
+                
+                <div className="flex items-center space-x-1">
+                  {getPageNumbers().map((page, index) => {
+                    if (page === '...') {
+                      return (
+                        <span key={`ellipsis-${index}`} className="px-1.5 text-gray-400 text-xs">
+                          ...
+                        </span>
+                      );
+                    }
+                    const pageNum = page as number;
+                    return (
+                      <button
+                        key={pageNum}
+                        onClick={() => {
+                          setPagination(prev => ({ ...prev, page: pageNum }));
+                          window.scrollTo(0, 0);
+                        }}
+                        className={`px-2.5 py-1 rounded text-xs ${
+                          pagination.page === pageNum
+                            ? 'bg-yellow-500 text-black font-bold'
+                            : 'bg-gray-600 hover:bg-gray-500 text-white'
+                        }`}
+                      >
+                        {pageNum}
+                      </button>
+                    );
+                  })}
+                </div>
+                
+                <button
+                  onClick={() => {
+                    setPagination(prev => ({ ...prev, page: prev.page + 1 }));
+                    window.scrollTo(0, 0);
+                  }}
+                  disabled={pagination.page >= totalPages}
+                  className="px-2.5 py-1 bg-gray-600 hover:bg-gray-500 disabled:opacity-50 disabled:cursor-not-allowed rounded text-xs"
+                >
+                  Siguiente
+                </button>
+              </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
 
         {/* Modal para detalles de orden */}
         {showOrderDetails.show && orderDetails && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
             <div className="bg-gray-800 rounded-lg p-4 w-full max-w-3xl max-h-[85vh] overflow-y-auto">
               <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-bold text-white">Orden #{orderDetails.order_id}</h3>
+                <h3 className="text-lg font-bold text-white">Orden #{orderDetails.order_number || orderDetails.order_id}</h3>
                 <button
                   onClick={() => setShowOrderDetails({ show: false, orderId: null })}
                   className="text-gray-400 hover:text-white"
@@ -459,7 +661,7 @@ const OrdersPage: React.FC = () => {
                   <div className="bg-gray-700 rounded p-3 space-y-1.5">
                     <div className="flex justify-between">
                       <span className="text-gray-300 text-sm">Estado:</span>
-                      <span className="text-white font-medium text-sm">{orderDetails.status}</span>
+                      <span className="text-white font-medium text-sm capitalize">{orderDetails.status ? orderDetails.status.charAt(0).toUpperCase() + orderDetails.status.slice(1).toLowerCase() : orderDetails.status}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-gray-300 text-sm">Total:</span>
@@ -518,6 +720,7 @@ const OrdersPage: React.FC = () => {
               </div>
 
               {/* URL de tracking */}
+              {/* Solo URL de la paquetería + código (nunca URL de nuestra web) */}
               {orderDetails.tracking_code && orderDetails.courier_url && (
                 <div className="mt-4">
                   <h4 className="text-base font-semibold text-white mb-2">Seguimiento</h4>

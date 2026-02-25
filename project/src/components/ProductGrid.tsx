@@ -50,13 +50,18 @@ const ProductGrid: React.FC<ProductGridProps> = ({
   });
 
   // Ordenar productos por prioridad:
-  // 1. Oferta (original_price > price)
+  // 1. Oferta (original_price > price en variante default)
   // 2. Destacado
   // 3. Nuevo
   // 4. Normales
   const sortedProducts = [...activeProducts].sort((a, b) => {
     const getPriority = (p: Product) => {
-      const isOffer = !!(p.original_price && p.original_price > p.price);
+      // Verificar oferta en variante default
+      const defaultVariant = p.variants?.find(v => v.is_default === true);
+      const isOffer = defaultVariant
+        ? !!(defaultVariant.original_price && defaultVariant.original_price > defaultVariant.price)
+        : !!(p.original_price && p.original_price > p.price);
+      
       if (isOffer) return 1;
       if (p.is_featured) return 2;
       if (p.is_new) return 3;
@@ -65,10 +70,26 @@ const ProductGrid: React.FC<ProductGridProps> = ({
     return getPriority(a) - getPriority(b);
   });
 
+  // Skeleton component
+  const ProductSkeleton = () => (
+    <div className="bg-gradient-to-br from-gray-800 to-gray-900 rounded-xl overflow-hidden shadow-lg h-full flex flex-col animate-pulse">
+      <div className="relative w-full aspect-[3/4] bg-gray-700"></div>
+      <div className="p-3 sm:p-4 flex-1 flex flex-col">
+        <div className="mb-2">
+          <div className="h-4 bg-gray-700 rounded mb-2"></div>
+          <div className="h-3 bg-gray-700 rounded w-2/3"></div>
+        </div>
+        <div className="mt-auto">
+          <div className="h-5 bg-gray-700 rounded w-1/2"></div>
+        </div>
+      </div>
+    </div>
+  );
+
   if (loading) {
     return (
-      <section className="bg-gradient-to-b from-gray-900 to-black">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
+      <section id="product-grid" className="py-16 bg-gradient-to-b from-gray-900 to-black">
+        <div className="max-w-6xl mx-auto px-1 sm:px-12 lg:px-32">
           <div className="text-center mb-12">
             <h2 className="text-3xl lg:text-4xl font-bold mb-4">
               <span className="bg-gradient-to-r from-gray-300 via-gray-400 to-gray-500 bg-clip-text text-transparent">
@@ -80,8 +101,12 @@ const ProductGrid: React.FC<ProductGridProps> = ({
             </p>
           </div>
           
-          <div className="flex items-center justify-center py-16">
-            <div className="animate-spin rounded-full h-24 w-24 border-b-2 border-gray-300"></div>
+          <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-5 lg:gap-4 w-full">
+            {[...Array(8)].map((_, i) => (
+              <div key={i} className="w-full h-full flex">
+                <ProductSkeleton />
+              </div>
+            ))}
           </div>
         </div>
       </section>
@@ -109,14 +134,7 @@ const ProductGrid: React.FC<ProductGridProps> = ({
             <p className="text-gray-300 mb-4 max-w-xl mx-auto text-sm">
               {error}
             </p>
-            <div className="bg-gray-800/50 border border-gray-700 rounded-lg p-4 max-w-xl mx-auto text-sm">
-              <h4 className="font-semibold text-gray-300 mb-2">Para solucionar:</h4>
-              <ul className="text-left text-gray-400 space-y-1">
-                <li>• Verifica las variables de entorno de Supabase</li>
-                <li>• Asegúrate que la base de datos esté funcionando</li>
-                <li>• Revisa la consola del navegador</li>
-              </ul>
-            </div>
+            
           </div>
         </div>
       </section>

@@ -26,14 +26,20 @@ export const useOrders = () => {
             product:products(*),
             variant:product_variants(*)
           ),
-          shipping_address:user_addresses(*)
+          shipping_address:user_addresses(*),
+          transaction:transactions(amount, subtotal, shipping, taxes, currency)
         `)
         .eq('user_id', user.id)
         .neq('status', 'reserved')
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-      setOrders((data || []).filter(order => order.status !== 'reserved'));
+      // transactions es un array por la relación 1:N; tomar la primera para cada orden
+      const ordersWithTx = (data || []).filter(order => order.status !== 'reserved').map((o: any) => ({
+        ...o,
+        transaction: Array.isArray(o.transaction) ? o.transaction[0] ?? null : o.transaction ?? null
+      }));
+      setOrders(ordersWithTx);
     } catch (err) {
       console.error('Error cargando órdenes:', err);
       setError(err instanceof Error ? err.message : 'Error cargando órdenes');
@@ -111,13 +117,18 @@ export const useOrders = () => {
             product:products(*),
             variant:product_variants(*)
           ),
-          shipping_address:user_addresses(*)
+          shipping_address:user_addresses(*),
+          transaction:transactions(amount, subtotal, shipping, taxes, currency)
         `)
         .eq('id', orderId)
         .single();
 
       if (error) throw error;
-      return data;
+      const o = data as any;
+      return {
+        ...o,
+        transaction: Array.isArray(o?.transaction) ? o.transaction[0] ?? null : o?.transaction ?? null
+      };
     } catch (err) {
       console.error('Error obteniendo orden:', err);
       setError(err instanceof Error ? err.message : 'Error obteniendo orden');

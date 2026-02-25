@@ -7,5 +7,3 @@ const finalUrl = supabaseUrl
 const finalKey = supabaseAnonKey
 
 export const supabase = createClient(finalUrl, finalKey);
-
-console.log('Supabase client created successfully'); 

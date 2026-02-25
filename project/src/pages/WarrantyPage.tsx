@@ -15,7 +15,7 @@ const WarrantyPage: React.FC = () => (
       <section className="bg-gray-900/60 border border-gray-800 rounded-2xl p-6 space-y-4">
         <h2 className="text-2xl font-semibold text-white">Duración</h2>
         <p className="text-gray-300">
-          La garantía cubre 12 meses a partir de la fecha de compra o entrega (lo que ocurra después). Aplica a piezas compradas en sitio web y showroom.
+          La garantía cubre el tiempo especificado en la descripcion de los productos y comienza a partir de la fecha de compra o entrega (lo que ocurra después). Aplica a piezas compradas en sitio web y showroom.
         </p>
       </section>
 

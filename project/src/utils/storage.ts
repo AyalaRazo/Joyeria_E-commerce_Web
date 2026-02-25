@@ -12,7 +12,7 @@ export const buildMediaUrl = (path: string | null | undefined): string => {
   
   // Si es localhost, usar Supabase directo
   if (isLocalhost) {
-    return `https://xrtfrtiubugctntwbami.supabase.co/storage/v1/object/public/products/${path}`;
+    return `${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/products/${path}`;
   }
 
   // Si el path ya incluye "videos/", asegurar que use la ruta correcta
@@ -158,4 +158,49 @@ export const uploadVideoToProductsBucket = async (
 
   // Guardamos solo el path relativo (sin dominio ni prefijos locales)
   return path;
+};
+
+/**
+ * Obtiene la primera imagen de una variante usando la función SQL get_variant_images
+ * Maneja todos los casos de herencia: propias, de otra variante, del modelo, o del producto
+ */
+export const getVariantFirstImage = async (
+  variantId: number | null | undefined,
+  productImage: string | null | undefined,
+  useProductImages?: boolean
+): Promise<string | null> => {
+  // Si no hay variant_id, usar imagen del producto
+  if (!variantId) {
+    return productImage || null;
+  }
+  
+  // Si use_product_images es true, usar imagen del producto
+  if (useProductImages) {
+    return productImage || null;
+  }
+  
+  try {
+    const { data, error } = await supabase.rpc('get_variant_images', {
+      p_variant_id: variantId
+    });
+    
+    if (error) {
+      console.error('Error fetching variant image:', error);
+      return productImage || null;
+    }
+    
+    // Obtener la primera imagen ordenada
+    const images = (data || [])
+      .sort((a: any, b: any) => (a.ordering || 0) - (b.ordering || 0));
+    
+    if (images.length > 0 && images[0].url) {
+      return images[0].url;
+    }
+    
+    // Fallback a imagen del producto
+    return productImage || null;
+  } catch (error) {
+    console.error('Error in getVariantFirstImage:', error);
+    return productImage || null;
+  }
 };

@@ -164,7 +164,7 @@ export const useCart = () => {
               name: product.name,
               price: variant?.price ?? product.price,
               original_price: product.original_price,
-              image: variant?.image || product.image,
+              image: product.image, // Siempre usar imagen del producto base
               description: product.description,
               material: product.material,
               category_id: product.category_id,
@@ -175,11 +175,12 @@ export const useCart = () => {
               product_id: variant.product_id,
               name: variant.name,
               price: variant.price,
-              image: variant.image,
+              image: variant.use_product_images ? product.image : (variant.image || product.image), // Usar imagen según use_product_images
               model: variant.model,
               size: variant.size,
               stock: variant.stock,
-              original_price: variant.original_price
+              original_price: variant.original_price,
+              use_product_images: variant.use_product_images
             } : undefined
           });
         }
@@ -228,7 +229,7 @@ export const useCart = () => {
             name: product.name,
             price: variant?.price ?? product.price,
             original_price: product.original_price,
-            image: variant?.image || product.image,
+            image: product.image, // Siempre usar imagen del producto base
             description: product.description,
             material: product.material,
             in_stock: product.in_stock,
@@ -244,11 +245,12 @@ export const useCart = () => {
             product_id: variant.product_id,
             name: variant.name,
             price: variant.price,
-            image: variant.image,
+            image: variant.use_product_images ? product.image : (variant.image || product.image), // Usar imagen según use_product_images
             model: variant.model,
             size: variant.size,
             stock: variant.stock,
-            original_price: variant.original_price
+            original_price: variant.original_price,
+            use_product_images: variant.use_product_images
           } : undefined
         };
         currentItems.unshift(newItem);

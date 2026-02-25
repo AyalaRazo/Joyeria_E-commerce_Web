@@ -19,8 +19,11 @@ const ProductPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [selectedModel, setSelectedModel] = useState('');
   const [selectedSize, setSelectedSize] = useState('');
+  const [selectedMetalType, setSelectedMetalType] = useState<number | null>(null);
+  const [selectedCarat, setSelectedCarat] = useState<number | null>(null);
   const [quantity, setQuantity] = useState(1);
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
+  const [variantImages, setVariantImages] = useState<string[]>([]);
   const [isWishlisted, setIsWishlisted] = useState(false);
   const [showImageModal, setShowImageModal] = useState(false);
   const [modalImageIndex, setModalImageIndex] = useState(0);
@@ -57,7 +60,8 @@ const ProductPage: React.FC = () => {
             *,
             variants:product_variants(
               *,
-              variant_images:variant_images(*)
+              variant_images:variant_images(*),
+              metal_type_info:metal_types(id, name)
             ),
             images:product_images(*),
             category:categories(*)
@@ -70,22 +74,14 @@ const ProductPage: React.FC = () => {
 
         setProduct(productData);
         
-        // Resetear selección de variantes y establecer valores por defecto
-        // Si hay variantes, no seleccionar ninguna por defecto para mostrar el producto principal
-        const defaultModel = '';
-        setSelectedModel(defaultModel);
+        // Obtener la variante default
+        const defaultVariant = productData.variants?.find((v: ProductVariant) => v.is_default === true);
         
-        // Si hay un modelo seleccionado, obtener los tamaños disponibles
-        if (defaultModel) {
-          const sizes = productData.variants
-            ?.filter((v: ProductVariant) => v.model === defaultModel)
-            .map((v: ProductVariant) => v.size)
-            .filter(Boolean) || [];
-          const defaultSize = sizes.length > 0 ? (sizes[0] as string || '') : '';
-          setSelectedSize(defaultSize);
-        } else {
-          setSelectedSize('');
-        }
+        // Resetear selección de variantes - empezar con la default (modelo vacío = default)
+        setSelectedModel('');
+        setSelectedSize('');
+        setSelectedMetalType(defaultVariant?.metal_type ?? null);
+        setSelectedCarat(defaultVariant?.carat ?? null);
         
         setCurrentImageIndex(0);
 
@@ -181,8 +177,11 @@ const ProductPage: React.FC = () => {
   };
 
   const handleToggleFavorite = async () => {
-    if (!user || !product) {
-      navigate('/login', { state: { from: window.location.pathname } });
+    // No permitir agregar a favoritos si no hay sesión
+    if (!user) {
+      return;
+    }
+    if (!product) {
       return;
     }
     if (checkingFavorite) return;
@@ -294,42 +293,164 @@ const ProductPage: React.FC = () => {
     }
   };
 
+  // Función para obtener imágenes de variante usando la función SQL get_variant_images
+  const fetchVariantImages = async (variantId: number): Promise<string[]> => {
+    try {
+      const { data, error } = await supabase.rpc('get_variant_images', {
+        p_variant_id: variantId
+      });
+      
+      if (error) {
+        console.error('Error fetching variant images:', error);
+        return [];
+      }
+      
+      // Ordenar por ordering y retornar solo las URLs
+      const images: string[] = (data || [])
+        .sort((a: any, b: any) => (a.ordering || 0) - (b.ordering || 0))
+        .map((img: any) => buildMediaUrl(img.url));
+      
+      return images;
+    } catch (error) {
+      console.error('Error in fetchVariantImages:', error);
+      return [];
+    }
+  };
+
+  // Efecto para cargar imágenes de variante cuando cambia la selección
+  useEffect(() => {
+    const loadVariantImages = async () => {
+      if (!product) {
+        setVariantImages([]);
+        return;
+      }
+      
+      // Determinar qué variante usar
+      let selectedVariant: ProductVariant | undefined;
+      
+      if (!selectedModel) {
+        // Si no hay modelo seleccionado, usar variante default
+        const defaultCandidates = product.variants?.filter(v => 
+          v.is_default === true &&
+          v.is_active !== false &&
+          (v.size === selectedSize || !selectedSize || !v.size)
+        ) || [];
+        
+        if (selectedMetalType != null || selectedCarat != null) {
+          const match = defaultCandidates.find(v =>
+            (selectedMetalType == null || v.metal_type === selectedMetalType) &&
+            (selectedCarat == null || (v.carat != null && v.carat === selectedCarat))
+          );
+          if (match) selectedVariant = match;
+          else selectedVariant = defaultCandidates[0];
+        } else {
+          selectedVariant = defaultCandidates[0];
+        }
+      } else {
+        const variantsWithModel = product.variants?.filter(v =>
+          v.model === selectedModel && v.is_active !== false
+        ) || [];
+        if (variantsWithModel.length === 0) {
+          setVariantImages([]);
+          return;
+        }
+        const candidates = variantsWithModel.filter(v =>
+          (v.size === selectedSize || !selectedSize || !v.size)
+        );
+        if (selectedMetalType != null || selectedCarat != null) {
+          const match = candidates.find(v =>
+            (selectedMetalType == null || v.metal_type === selectedMetalType) &&
+            (selectedCarat == null || (v.carat != null && v.carat === selectedCarat))
+          );
+          if (match) selectedVariant = match;
+          else selectedVariant = candidates[0];
+        } else {
+          selectedVariant = candidates[0];
+        }
+      }
+      if (!selectedVariant) {
+        setVariantImages([]);
+        return;
+      }
+      if (selectedVariant.use_product_images) {
+        setVariantImages([]);
+        return;
+      }
+      const images = await fetchVariantImages(selectedVariant.id);
+      setVariantImages(images);
+    };
+    loadVariantImages();
+  }, [product, selectedModel, selectedSize, selectedMetalType, selectedCarat]);
+
   const getAllImages = (): string[] => {
     if (!product) return [];
     
-    const selectedVariant = product.variants?.find(v => 
-      (v.model === selectedModel || !v.model) && 
-      (v.size === selectedSize || !v.size)
-    );
-
-    if (selectedVariant && (selectedVariant.variant_images?.length || selectedVariant.image)) {
-      const variantImages: string[] = [];
-      
-      if (selectedVariant.image) {
-        variantImages.push(buildMediaUrl(selectedVariant.image));
-      }
-      
-      if (selectedVariant.variant_images?.length) {
-        selectedVariant.variant_images.forEach(img => {
-          if (img.url) variantImages.push(buildMediaUrl(img.url));
-        });
-      }
-      
-      return variantImages;
-    }
+    // Determinar qué variante usar
+    let selectedVariant: ProductVariant | undefined;
     
+    if (!selectedModel) {
+      // Si no hay modelo seleccionado, usar variante default
+      const defaultCandidates = product.variants?.filter(v => 
+        v.is_default === true &&
+        v.is_active !== false &&
+        (v.size === selectedSize || !selectedSize || !v.size)
+      ) || [];
+      
+      if (selectedMetalType != null || selectedCarat != null) {
+        const match = defaultCandidates.find(v =>
+          (selectedMetalType == null || v.metal_type === selectedMetalType) &&
+          (selectedCarat == null || (v.carat != null && v.carat === selectedCarat))
+        );
+        if (match) selectedVariant = match;
+        else selectedVariant = defaultCandidates[0];
+      } else {
+        selectedVariant = defaultCandidates[0];
+      }
+    } else {
+      const variantsWithModel = product.variants?.filter(v =>
+        v.model === selectedModel && v.is_active !== false
+      ) || [];
+      if (variantsWithModel.length === 0) {
+        const productImages: string[] = [];
+        if (product.image) productImages.push(buildMediaUrl(product.image));
+        if (product.images?.length) product.images.forEach(img => { if (img.url) productImages.push(buildMediaUrl(img.url)); });
+        return productImages;
+      }
+      const candidates = variantsWithModel.filter(v =>
+        (v.size === selectedSize || !selectedSize || !v.size)
+      );
+      if (selectedMetalType != null || selectedCarat != null) {
+        const match = candidates.find(v =>
+          (selectedMetalType == null || v.metal_type === selectedMetalType) &&
+          (selectedCarat == null || (v.carat != null && v.carat === selectedCarat))
+        );
+        if (match) selectedVariant = match;
+        else selectedVariant = candidates[0];
+      } else {
+        selectedVariant = candidates[0];
+      }
+    }
+    if (!selectedVariant) {
+      const productImages: string[] = [];
+      if (product.image) productImages.push(buildMediaUrl(product.image));
+      if (product.images?.length) product.images.forEach(img => { if (img.url) productImages.push(buildMediaUrl(img.url)); });
+      return productImages;
+    }
+    if (selectedVariant.use_product_images) {
+      const productImages: string[] = [];
+      if (product.image) productImages.push(buildMediaUrl(product.image));
+      if (product.images?.length) product.images.forEach(img => { if (img.url) productImages.push(buildMediaUrl(img.url)); });
+      return productImages;
+    }
+    // Imagen principal primero: product.image o imagen de variante, luego el resto
+    if (variantImages.length > 0) {
+      const mainUrl = product.image ? buildMediaUrl(product.image) : (selectedVariant.image ? buildMediaUrl(selectedVariant.image) : variantImages[0]);
+      const rest = variantImages.filter(url => url !== mainUrl);
+      return [mainUrl, ...rest];
+    }
     const productImages: string[] = [];
-    
-    if (product.image) {
-      productImages.push(buildMediaUrl(product.image));
-    }
-    
-    if (product.images?.length) {
-      product.images.forEach(img => {
-        if (img.url) productImages.push(buildMediaUrl(img.url));
-      });
-    }
-    
+    if (product.image) productImages.push(buildMediaUrl(product.image));
+    if (product.images?.length) product.images.forEach(img => { if (img.url) productImages.push(buildMediaUrl(img.url)); });
     return productImages;
   };
 
@@ -384,12 +505,46 @@ const ProductPage: React.FC = () => {
     if (!product) return;
 
     try {
-      const selectedVariant = product.variants?.find(v =>
-        (v.model === selectedModel || !v.model) &&
-        (v.size === selectedSize || !v.size)
-      );
+      // Obtener la variante default o la seleccionada
+      const defaultVariant = product.variants?.find(v => v.is_default === true);
+      
+      const findSelectedVariant = () => {
+        if (!selectedModel) {
+          const defaultCandidates = product.variants?.filter(v =>
+            v.is_default === true && v.is_active !== false &&
+            (v.size === selectedSize || !selectedSize || !v.size)
+          ) || [];
+          if (selectedMetalType != null || selectedCarat != null) {
+            const match = defaultCandidates.find(v =>
+              (selectedMetalType == null || v.metal_type === selectedMetalType) &&
+              (selectedCarat == null || (v.carat != null && v.carat === selectedCarat))
+            );
+            if (match) return match;
+          }
+          return defaultCandidates[0] || defaultVariant;
+        }
+        const candidates = product.variants?.filter(v =>
+          v.model === selectedModel && v.is_active !== false &&
+          (v.size === selectedSize || !selectedSize || !v.size)
+        ) || [];
+        if (selectedMetalType != null || selectedCarat != null) {
+          const match = candidates.find(v =>
+            (selectedMetalType == null || v.metal_type === selectedMetalType) &&
+            (selectedCarat == null || (v.carat != null && v.carat === selectedCarat))
+          );
+          if (match) return match;
+        }
+        return candidates[0] || defaultVariant;
+      };
+      
+      const selectedVariant = findSelectedVariant();
 
-      const stock = selectedVariant?.stock ?? product.stock ?? 0;
+      // Si no hay variante disponible, no se puede agregar
+      if (!selectedVariant || selectedVariant.is_active === false) {
+        throw new Error('Esta variante no está disponible');
+      }
+
+      const stock = selectedVariant.stock ?? 0;
       if (stock <= 0) {
         throw new Error('Este producto está agotado');
       }
@@ -457,19 +612,31 @@ const ProductPage: React.FC = () => {
     );
   }
 
-  const selectedVariant = product.variants?.find(v => 
-    (v.model === selectedModel || !v.model) && 
-    (v.size === selectedSize || !v.size)
-  );
+  const defaultVariant = product.variants?.find(v => v.is_default === true);
+  const getSelectedVariant = (): ProductVariant | undefined => {
+    const base = !selectedModel
+      ? product.variants?.filter(v => v.is_default === true && v.is_active !== false && (v.size === selectedSize || !selectedSize || !v.size)) || []
+      : product.variants?.filter(v => v.model === selectedModel && v.is_active !== false && (v.size === selectedSize || !selectedSize || !v.size)) || [];
+    if (selectedMetalType != null || selectedCarat != null) {
+      const match = base.find(v =>
+        (selectedMetalType == null || v.metal_type === selectedMetalType) &&
+        (selectedCarat == null || (v.carat != null && v.carat === selectedCarat))
+      );
+      return match || base[0];
+    }
+    return base[0];
+  };
+  const selectedVariant = getSelectedVariant();
 
-  const currentPrice = selectedVariant ? selectedVariant.price : product.price;
+  const currentPrice = selectedVariant?.price ?? product.price;
+  const currentOriginalPrice = selectedVariant?.original_price ?? product.original_price;
   const allImages = getAllImages();
   const currentImage = allImages[currentImageIndex] || buildMediaUrl(product.image);
   const currentImageIsVideo = isVideoUrl(currentImage);
-  const discountPercentage = product.original_price && product.original_price > currentPrice 
-    ? Math.round(((product.original_price - currentPrice) / product.original_price) * 100)
+  const discountPercentage = currentOriginalPrice && currentOriginalPrice > currentPrice 
+    ? Math.round(((currentOriginalPrice - currentPrice) / currentOriginalPrice) * 100)
     : 0;
-  const stock = selectedVariant?.stock ?? product?.stock ?? 0;
+  const stock = selectedVariant?.stock ?? 0;
 
   // Widget de estimación de entrega (sin dependencias externas)
   const addBusinessDays = (date: Date, days: number) => {
@@ -525,17 +692,19 @@ const ProductPage: React.FC = () => {
             </button>
             
             <div className="flex items-center space-x-3">
-              <button
-                onClick={handleToggleFavorite}
-                disabled={checkingFavorite}
-                className={`p-1.5 rounded-full transition-colors ${
-                  isWishlisted 
-                    ? 'text-red-500 bg-red-500/10' 
-                    : 'text-gray-400 hover:text-red-500 hover:bg-red-500/10'
-                } ${checkingFavorite ? 'opacity-50 cursor-not-allowed' : ''}`}
-              >
-                <Heart className={`h-4 w-4 ${isWishlisted ? 'fill-current' : ''}`} />
-              </button>
+              {user && (
+                <button
+                  onClick={handleToggleFavorite}
+                  disabled={checkingFavorite}
+                  className={`p-1.5 rounded-full transition-colors ${
+                    isWishlisted 
+                      ? 'text-red-500 bg-red-500/10' 
+                      : 'text-gray-400 hover:text-red-500 hover:bg-red-500/10'
+                  } ${checkingFavorite ? 'opacity-50 cursor-not-allowed' : ''}`}
+                >
+                  <Heart className={`h-4 w-4 ${isWishlisted ? 'fill-current' : ''}`} />
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -604,10 +773,10 @@ const ProductPage: React.FC = () => {
                 {new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(currentPrice)}
               </span>
 
-              {product.original_price && product.original_price > currentPrice && (
+              {currentOriginalPrice && currentOriginalPrice > currentPrice && (
                 <div className="flex flex-col items-start gap-0.5">
                   <span className="text-xl text-gray-500 line-through">
-                    {new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(product.original_price)}
+                    {new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(currentOriginalPrice)}
                   </span>
                   <span className="bg-red-600 text-white px-1.5 py-0.5 rounded text-xs font-bold">
                     {discountPercentage}% OFF
@@ -628,12 +797,16 @@ const ProductPage: React.FC = () => {
                 <div className="bg-gradient-to-r from-blue-900/20 to-blue-800/20 border border-blue-500/20 rounded-md p-3 text-center">
                   <div className="text-blue-400 text-xl mb-1">🛡️</div>
                   <h4 className="text-blue-300 font-medium text-xs mb-0.5">Garantía</h4>
-                  <p className="text-blue-200 text-[10px]">{product.warranty_period} {product.warranty_unit}</p>
+                  <p className="text-blue-200 text-[10px]">
+                    {product.warranty_unit === 'lifetime'
+                      ? 'De por vida'
+                      : `${product.warranty_period} ${product.warranty_unit}`}
+                  </p>
                 </div>
               )}
 
               <div className="bg-gradient-to-r from-purple-900/20 to-purple-800/20 border border-purple-500/20 rounded-md p-3 text-center">
-                <div className="text-purple-400 text-xl mb-1">↩️</div>
+                <div className="text-purple-400 text-xl mb-1">🔙</div>
                 <h4 className="text-purple-300 font-medium text-xs mb-0.5">Devoluciones</h4>
                 <p className="text-purple-200 text-[10px]">Hasta 1 mes</p>
               </div>
@@ -657,51 +830,171 @@ const ProductPage: React.FC = () => {
             </div>
             
             {/* Selector de variantes - más compacto */}
-            {product.variants && product.variants.length > 0 && (
-              <div className="w-full mb-4">
-                {product.variants.some((v: ProductVariant) => v.model) && (
-                  <>
-                    <label className="block text-gray-300 text-xs font-medium mb-1.5">Modelo:</label>
-                    <select
-                      className="w-full bg-gray-900 text-white rounded-md p-2 border border-gray-700 focus:ring-1 focus:ring-yellow-400 text-sm font-medium shadow-sm transition-all duration-150 mb-3"
-                      value={selectedModel}
-                      onChange={e => {
-                        setSelectedModel(e.target.value);
-                        const sizes = product.variants
-                          ?.filter((v: ProductVariant) => v.model === e.target.value)
-                          .map((v: ProductVariant) => v.size)
-                          .filter(Boolean) || [];
-                        setSelectedSize(sizes[0] || '');
-                      }}
-                    >
-                      <option value="">Principal</option>
-                      {[...new Set(product.variants.map((v: ProductVariant) => v.model).filter(Boolean))].map(model => (
-                        <option key={model} value={model}>{model}</option>
-                      ))}
-                    </select>
-                  </>
-                )}
-                
-                {product.variants.some((v: ProductVariant) => v.size && v.model === selectedModel) && (
-                  <>
-                    <label className="block text-gray-300 text-xs font-medium mb-1.5">Tamaño:</label>
-                    <select
-                      className="w-full bg-gray-900 text-white rounded-md p-2 border border-gray-700 focus:ring-1 focus:ring-yellow-400 text-sm font-medium shadow-sm transition-all duration-150"
-                      value={selectedSize}
-                      onChange={e => setSelectedSize(e.target.value)}
-                    >
-                      {[...new Set(product.variants
-                        .filter((v: ProductVariant) => v.model === selectedModel)
-                        .map((v: ProductVariant) => v.size)
-                        .filter(Boolean)
-                      )].map(size => (
-                        <option key={size} value={size}>{size}</option>
-                      ))}
-                    </select>
-                  </>
-                )}
-              </div>
-            )}
+            {product.variants && product.variants.length > 0 && (() => {
+              // Obtener modelos únicos (incluyendo default si tiene nombre)
+              const defaultVariantWithModel = product.variants.find((v: ProductVariant) => 
+                v.is_default === true && v.model && v.is_active !== false
+              );
+              const availableModels = [...new Set(product.variants
+                .filter((v: ProductVariant) => v.is_active !== false && v.model)
+                .map((v: ProductVariant) => v.model)
+                .filter(Boolean))];
+              
+              // Determinar si hay variantes default con tallas
+              const defaultVariants = product.variants.filter((v: ProductVariant) => 
+                v.is_default === true && v.is_active !== false
+              );
+              const hasDefaultSizes = defaultVariants.some((v: ProductVariant) => v.size);
+              
+              // Si no hay modelos y no hay tallas en default, no mostrar selectores
+              if (availableModels.length === 0 && !hasDefaultSizes) return null;
+              
+              return (
+                <div className="w-full mb-4 space-y-3">
+                  {/* Selector de Modelo */}
+                  {(availableModels.length > 0 || defaultVariantWithModel) && (
+                    <div>
+                      <label className="block text-gray-300 text-xs font-medium mb-1.5">Modelo:</label>
+                      <select
+                        className="w-full bg-gray-900 text-white rounded-md p-2 border border-gray-700 focus:ring-1 focus:ring-yellow-400 text-sm font-medium shadow-sm transition-all duration-150"
+                        value={selectedModel}
+                        onChange={e => {
+                          setSelectedModel(e.target.value);
+                          // Resetear talla y metal_type al cambiar modelo
+                          const sizes = product.variants
+                            ?.filter((v: ProductVariant) => {
+                              if (e.target.value === '') {
+                                return v.is_default === true && v.is_active !== false;
+                              }
+                              return v.model === e.target.value && v.is_active !== false;
+                            })
+                            .map((v: ProductVariant) => v.size)
+                            .filter(Boolean) || [];
+                          setSelectedSize(sizes[0] || '');
+                          
+                          setSelectedMetalType(null);
+                          setSelectedCarat(null);
+                        }}
+                      >
+                        <option value="">
+                          {defaultVariantWithModel ? defaultVariantWithModel.model : 'Principal'}
+                        </option>
+                        {availableModels
+                          .filter((m): m is string => m !== undefined && m !== null && m !== defaultVariantWithModel?.model)
+                          .map((model: string) => (
+                            <option key={model} value={model}>{model}</option>
+                          ))}
+                      </select>
+                    </div>
+                  )}
+                  
+                  {/* Selector de Talla - mostrar si hay tallas para el modelo seleccionado o default */}
+                  {(() => {
+                    const currentModel = selectedModel || '';
+                    const variantsForModel = product.variants.filter((v: ProductVariant) => {
+                      if (currentModel === '') {
+                        return v.is_default === true && v.is_active !== false;
+                      }
+                      return v.model === currentModel && v.is_active !== false;
+                    });
+                    
+                    const availableSizes = [...new Set(variantsForModel
+                      .map((v: ProductVariant) => v.size)
+                      .filter((s): s is string => s !== undefined && s !== null))];
+                    
+                    if (availableSizes.length === 0) return null;
+                    
+                    return (
+                      <div>
+                        <label className="block text-gray-300 text-xs font-medium mb-1.5">Talla:</label>
+                        <select
+                          className="w-full bg-gray-900 text-white rounded-md p-2 border border-gray-700 focus:ring-1 focus:ring-yellow-400 text-sm font-medium shadow-sm transition-all duration-150"
+                          value={selectedSize}
+                          onChange={e => {
+                            setSelectedSize(e.target.value);
+                            const variantForSize = variantsForModel.find((v: ProductVariant) => v.size === e.target.value);
+                            if (variantForSize) {
+                              setSelectedMetalType(variantForSize.metal_type ?? null);
+                              setSelectedCarat(variantForSize.carat ?? null);
+                            } else {
+                              setSelectedMetalType(null);
+                              setSelectedCarat(null);
+                            }
+                          }}
+                        >
+                          {availableSizes.map((size: string) => (
+                            <option key={size} value={size}>{size}</option>
+                          ))}
+                        </select>
+                      </div>
+                    );
+                  })()}
+                  
+                  {/* Selector Kilataje: metal_type + carat (mismo modelo y talla, distintos quilates) */}
+                  {(() => {
+                    const currentModel = selectedModel || '';
+                    const currentSize = selectedSize || '';
+                    const variantsForSelection = product.variants.filter((v: ProductVariant) => {
+                      if (currentModel === '') {
+                        const ok = v.is_default === true && v.is_active !== false;
+                        return currentSize ? ok && v.size === currentSize : ok;
+                      }
+                      const ok = v.model === currentModel && v.is_active !== false;
+                      return currentSize ? ok && v.size === currentSize : ok;
+                    });
+                    const uniqueMetalCarat = Array.from(
+                      new Map(
+                        variantsForSelection
+                          .filter((v: ProductVariant) => v.metal_type != null || (v.carat != null && v.carat > 0))
+                          .map((v: ProductVariant) => [
+                            `${v.metal_type ?? 'n'}_${v.carat ?? 0}`,
+                            { metal_type: v.metal_type ?? null, carat: v.carat ?? null, variant: v }
+                          ])
+                      ).values()
+                    );
+                    if (uniqueMetalCarat.length === 0) return null;
+                    const getOptionLabel = (item: { metal_type: number | null; carat: number | null; variant: ProductVariant }) => {
+                      const name = (item.variant as any)?.metal_type_info?.name || (item.metal_type != null ? `Metal ${item.metal_type}` : '');
+                      const caratStr = item.carat != null && item.carat > 0 ? ` ${item.carat}k` : '';
+                      return (name + caratStr).trim() || 'Kilataje';
+                    };
+                    return (
+                      <div>
+                        <label className="block text-gray-300 text-xs font-medium mb-1.5">Kilataje:</label>
+                        <select
+                          className="w-full bg-gray-900 text-white rounded-md p-2 border border-gray-700 focus:ring-1 focus:ring-yellow-400 text-sm font-medium shadow-sm transition-all duration-150"
+                          value={selectedMetalType != null || selectedCarat != null ? `${selectedMetalType ?? 'n'}_${selectedCarat ?? 0}` : ''}
+                          onChange={e => {
+                            const val = e.target.value;
+                            if (!val) {
+                              setSelectedMetalType(null);
+                              setSelectedCarat(null);
+                              return;
+                            }
+                            const item = uniqueMetalCarat.find(
+                              x => `${x.metal_type ?? 'n'}_${x.carat ?? 0}` === val
+                            );
+                            if (item) {
+                              setSelectedMetalType(item.metal_type);
+                              setSelectedCarat(item.carat);
+                            }
+                          }}
+                        >
+                          {uniqueMetalCarat.map((item) => {
+                            const key = `${item.metal_type ?? 'n'}_${item.carat ?? 0}`;
+                            return (
+                              <option key={key} value={key}>
+                                {getOptionLabel(item)}
+                              </option>
+                            );
+                          })}
+                        </select>
+                      </div>
+                    );
+                  })()}
+                </div>
+              );
+            })()}
             
             {/* Cantidad y botón agregar - más compacto */}
             <div className="space-y-4">

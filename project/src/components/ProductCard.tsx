@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Product } from '../types';
 import { Sparkles } from 'lucide-react';
 import { buildMediaUrl, isVideoUrl } from '../utils/storage';
+import { supabase } from '../lib/supabase';
 
 interface ProductCardProps {
   product: Product;
@@ -11,19 +12,111 @@ interface ProductCardProps {
 const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
   const navigate = useNavigate();
   
-  const getDefaultModel = () => {
-    if (!product.variants || product.variants.length === 0) return '';
-    return '';
+  // Obtener la variante default
+  const getDefaultVariant = () => {
+    if (!product.variants || product.variants.length === 0) return null;
+    return product.variants.find(v => v.is_default === true) || null;
   };
 
-  const [selectedModel, setSelectedModel] = useState(getDefaultModel());
+  // Obtener modelos disponibles (excluyendo el default; ningún modelo se repite)
+  const getAvailableModels = () => {
+    if (!product.variants || product.variants.length === 0) return [];
+    const defaultVariant = getDefaultVariant();
+    const defaultModelNorm = (defaultVariant?.model ?? '').trim().toLowerCase();
+    // Excluir variantes inactivas, la default por id, o con el mismo nombre de modelo que la default
+    const nonDefaultVariants = product.variants.filter(v => {
+      if (v.is_active === false) return false;
+      if (defaultVariant && v.id === defaultVariant.id) return false;
+      const vModel = (v.model ?? '').trim().toLowerCase();
+      if (defaultModelNorm && vModel === defaultModelNorm) return false;
+      return true;
+    });
+
+    // Agrupar por modelo (sin duplicados) y asignar índices
+    const modelMap = new Map<string, { index: number }>();
+    let modelIndex = 1;
+    nonDefaultVariants.forEach(variant => {
+      const modelKey = (variant.model ?? '').trim();
+      if (!modelMap.has(modelKey)) {
+        modelMap.set(modelKey, { index: modelIndex++ });
+      }
+    });
+
+    return Array.from(modelMap.entries()).map(([model, data]) => ({ model, index: data.index }));
+  };
+  
+  // Obtener nombre de modelo para mostrar
+  const getModelDisplayName = (model: string | null | undefined, isDefault: boolean, modelIndex?: number): string => {
+    if (isDefault) {
+      return model || 'Principal';
+    }
+    
+    if (!model || model.trim() === '') {
+      // Si no tiene nombre, usar "Modelo {número}"
+      return `Modelo ${modelIndex || 1}`;
+    }
+    
+    return model;
+  };
+
+  const defaultVariant = getDefaultVariant();
+  const availableModels = getAvailableModels();
+  const [selectedModel, setSelectedModel] = useState('');
+  const [variantImage, setVariantImage] = useState<string | null>(null);
 
   useEffect(() => {
-    const defModel = getDefaultModel();
-    setSelectedModel(defModel);
+    setSelectedModel('');
+    setVariantImage(null);
   }, [product.id]);
 
-  const selectedVariant = selectedModel ? product.variants?.find(v => v.model === selectedModel) : null;
+  // Si hay un modelo seleccionado, buscar esa variante, sino usar la default
+  const selectedVariant = selectedModel 
+    ? product.variants?.find(v => v.model === selectedModel && v.is_active !== false)
+    : defaultVariant;
+
+  // Cargar imagen de variante cuando cambia la selección
+  useEffect(() => {
+    const loadVariantImage = async () => {
+      if (!selectedVariant) {
+        setVariantImage(null);
+        return;
+      }
+      
+      // Si use_product_images es true, usar imagen del producto
+      if (selectedVariant.use_product_images) {
+        setVariantImage(null);
+        return;
+      }
+      
+      // Obtener primera imagen usando la función SQL
+      try {
+        const { data, error } = await supabase.rpc('get_variant_images', {
+          p_variant_id: selectedVariant.id
+        });
+        
+        if (error) {
+          console.error('Error fetching variant image:', error);
+          setVariantImage(null);
+          return;
+        }
+        
+        // Obtener la primera imagen ordenada
+        const images = (data || [])
+          .sort((a: any, b: any) => (a.ordering || 0) - (b.ordering || 0));
+        
+        if (images.length > 0 && images[0].url) {
+          setVariantImage(images[0].url);
+        } else {
+          setVariantImage(null);
+        }
+      } catch (error) {
+        console.error('Error in loadVariantImage:', error);
+        setVariantImage(null);
+      }
+    };
+    
+    loadVariantImage();
+  }, [selectedVariant]);
 
   const formatPrice = (price: number) => {
     return new Intl.NumberFormat('es-MX', {
@@ -32,14 +125,34 @@ const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
     }).format(price);
   };
 
-  const displayImage = buildMediaUrl(selectedVariant?.image || product.image);
-  const displayPrice = selectedVariant?.price || product.price;
+  // Determinar qué imagen usar
+  const getDisplayImage = () => {
+    if (!selectedVariant) return product.image;
+    
+    // Si use_product_images es true, usar imagen del producto
+    if (selectedVariant.use_product_images) {
+      return product.image;
+    }
+    
+    // Si hay imagen de variante cargada, usarla
+    if (variantImage) {
+      return variantImage;
+    }
+    
+    // Fallback a imagen del producto
+    return product.image;
+  };
+
+  const displayImage = buildMediaUrl(getDisplayImage());
+  const displayPrice = selectedVariant?.price ?? product.price;
+  const displayOriginalPrice = selectedVariant?.original_price ?? product.original_price;
   const isVideo = isVideoUrl(displayImage);
+  
+  // Stock: verificar si hay stock en alguna variante activa
   const hasVariantStock = product.variants && product.variants.length > 0
-    ? product.variants.some(variant => (variant.stock ?? 0) > 0)
+    ? product.variants.some(variant => variant.is_active !== false && (variant.stock ?? 0) > 0)
     : false;
-  const baseAvailable = product.in_stock !== false && (product.stock ?? 0) > 0;
-  const isSoldOut = !(baseAvailable || hasVariantStock);
+  const isSoldOut = !hasVariantStock;
 
   const handleClick = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -95,7 +208,7 @@ const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
           {product.is_featured && (
             <span className="bg-gray-300 text-black px-1.5 py-0.5 rounded-full text-[9px] font-bold">DESTACADO</span>
           )}
-          {product.original_price && product.original_price > displayPrice && (
+          {displayOriginalPrice && displayOriginalPrice > displayPrice && (
             <span className="bg-red-600 text-white px-1.5 py-0.5 rounded-full text-[9px] font-bold">OFERTA</span>
           )}
         </div>
@@ -112,8 +225,8 @@ const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
           </p>
         </div>
 
-        {/* Selector de modelo - más compacto */}
-        {product.variants && product.variants.some(v => v.model) && (
+        {/* Selector de modelo - más compacto - solo mostrar si hay modelos además del default */}
+        {availableModels.length > 0 && (
           <div className="mb-3">
             <label className="block text-gray-400 text-[10px] mb-1">Modelo:</label>
             <select
@@ -122,10 +235,13 @@ const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
               onChange={e => setSelectedModel(e.target.value)}
               onClick={handleSelectChange}
             >
-              <option value="">Principal</option>
-              {[...new Set(product.variants.map(v => v.model).filter(Boolean))].map(model => (
-                <option key={model} value={model}>{model}</option>
-              ))}
+              <option value="">{defaultVariant ? getModelDisplayName(defaultVariant.model, true) : 'Seleccionar'}</option>
+              {availableModels.map((modelData) => {
+                const displayName = getModelDisplayName(modelData.model, false, modelData.index);
+                return (
+                  <option key={modelData.model || `model-${modelData.index}`} value={modelData.model}>{displayName}</option>
+                );
+              })}
             </select>
           </div>
         )}
@@ -136,17 +252,22 @@ const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
             <span className="text-base sm:text-lg font-bold text-gray-300">
               {formatPrice(displayPrice)}
             </span>
-            {product.original_price && product.original_price > displayPrice && (
-              <span className="text-xs sm:text-sm text-gray-500 line-through">
-                {formatPrice(product.original_price)}
-              </span>
+            {displayOriginalPrice && displayOriginalPrice > displayPrice && (
+              <>
+                <span className="text-xs sm:text-sm text-gray-500 line-through">
+                  {formatPrice(displayOriginalPrice)}
+                </span>
+                <span className="bg-red-600 text-white px-1.5 py-0.5 rounded text-[9px] font-bold">
+                  {Math.round(((displayOriginalPrice - displayPrice) / displayOriginalPrice) * 100)}% OFF
+                </span>
+              </>
             )}
           </div>
 
-          {product.original_price && product.original_price > displayPrice && (
+          {displayOriginalPrice && displayOriginalPrice > displayPrice && (
             <div className="mb-1">
               <span className="text-xs text-green-400 font-medium">
-                Ahorras: {formatPrice(product.original_price - displayPrice)}
+                Ahorras: {formatPrice(displayOriginalPrice - displayPrice)}
               </span>
             </div>
           )}

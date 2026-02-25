@@ -9,6 +9,8 @@ const emptyAddress: Omit<UserAddress, 'id' | 'user_id'> = {
   phone: '',
   address_line1: '',
   address_line2: '',
+  exterior_number: '',
+  interior_number: '',
   city: '',
   state: '',
   postal_code: '',
@@ -49,6 +51,8 @@ const UserAddresses: React.FC = () => {
       phone: addr.phone || '',
       address_line1: addr.address_line1,
       address_line2: addr.address_line2 || '',
+      exterior_number: addr.exterior_number || '',
+      interior_number: addr.interior_number || '',
       city: addr.city,
       state: addr.state || '',
       postal_code: addr.postal_code || '',
@@ -98,7 +102,7 @@ const UserAddresses: React.FC = () => {
                     </div>
                     {addr.name && <p className="text-gray-300 text-sm">{addr.name}</p>}
                     <p className="text-gray-300 text-sm">{addr.address_line1}</p>
-                    {addr.address_line2 && <p className="text-gray-400 text-xs">{addr.address_line2}</p>}
+                    {addr.address_line2 && <p className="text-gray-400 text-xs">{addr.address_line2}{addr.exterior_number || addr.interior_number ? ` ${[addr.exterior_number, addr.interior_number].filter(Boolean).join(' int. ')}` : ''}</p>}
                     <p className="text-gray-400 text-xs">{addr.city}{addr.state ? `, ${addr.state}` : ''} {addr.postal_code || ''}</p>
                     <p className="text-gray-500 text-xs">{addr.country || 'MX'} {addr.phone ? `· ${addr.phone}` : ''}</p>
                   </div>
@@ -137,6 +141,10 @@ const UserAddresses: React.FC = () => {
                 </div>
                 <input className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white" placeholder="Colonia/Fraccionamiento" value={form.address_line1} onChange={e => setForm({ ...form, address_line1: e.target.value })} required />
                 <input className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white" placeholder="Calle y número" value={form.address_line2 || ''} onChange={e => setForm({ ...form, address_line2: e.target.value })} />
+                <div className="grid grid-cols-2 gap-3">
+                  <input className="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white" placeholder="Núm. exterior" value={form.exterior_number || ''} onChange={e => setForm({ ...form, exterior_number: e.target.value })} />
+                  <input className="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white" placeholder="Núm. interior" value={form.interior_number || ''} onChange={e => setForm({ ...form, interior_number: e.target.value })} />
+                </div>
                 <div className="grid grid-cols-2 gap-3">
                   <input className="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white" placeholder="Municipio" value={form.city} onChange={e => setForm({ ...form, city: e.target.value })} required />
                   <input className="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white" placeholder="Estado" value={form.state || ''} onChange={e => setForm({ ...form, state: e.target.value })} />

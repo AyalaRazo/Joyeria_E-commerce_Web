@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
-import type { Product, Category } from '../types';
+import type { Product, Category, MetalType } from '../types';
 
 export const useProducts = () => {
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [metalTypes, setMetalTypes] = useState<MetalType[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -27,6 +28,22 @@ export const useProducts = () => {
     } catch (err) {
       console.error('❌ Error cargando categorías:', err);
       setError('Error cargando categorías');
+      return [];
+    }
+  };
+
+  // Cargar metal types (oro, plata, etc.) para filtros
+  const loadMetalTypes = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('metal_types')
+        .select('*')
+        .order('name');
+      if (error) throw error;
+      setMetalTypes((data || []) as MetalType[]);
+      return data || [];
+    } catch (err) {
+      console.error('❌ Error cargando metal_types:', err);
       return [];
     }
   };
@@ -59,10 +76,13 @@ export const useProducts = () => {
       if (productsData && productsData.length > 0) {
         const productIds = productsData.map(p => p.id);
         
-        // Cargar variantes
+        // Cargar variantes con sus imágenes
         const { data: variantsData, error: variantsError } = await supabase
           .from('product_variants')
-          .select('*')
+          .select(`
+            *,
+            variant_images:variant_images(*)
+          `)
           .in('product_id', productIds);
 
         if (variantsError) console.error('⚠️ Error variantes:', variantsError);
@@ -76,12 +96,49 @@ export const useProducts = () => {
         if (imagesError) console.error('⚠️ Error imágenes:', imagesError);
 
         // Combinar datos
-        const productsWithRelations = productsData.map(product => ({
-          ...product,
-          category: categories.find(cat => cat.id === product.category_id) || null,
-          variants: variantsData?.filter(v => v.product_id === product.id) || [],
-          images: imagesData?.filter(img => img.product_id === product.id) || []
-        }));
+        let productsWithRelations = productsData.map(product => {
+          const productVariants = variantsData?.filter(v => v.product_id === product.id) || [];
+          // Normalizar variantes con variant_images
+          const normalizedVariants = productVariants.map((variant: any) => ({
+            ...variant,
+            variant_images: variant.variant_images || [],
+            images: variant.variant_images || []
+          }));
+          
+          return {
+            ...product,
+            category: categories.find(cat => cat.id === product.category_id) || null,
+            variants: normalizedVariants,
+            images: imagesData?.filter(img => img.product_id === product.id) || []
+          };
+        });
+
+        // Filtrar productos activos y con variantes activas
+        productsWithRelations = productsWithRelations.filter(product => {
+          if (product.is_active === false) return false;
+          // Si tiene variantes, al menos una debe estar activa
+          if (product.variants && product.variants.length > 0) {
+            return product.variants.some((v: any) => v.is_active !== false);
+          }
+          return true;
+        });
+
+        // Ordenar productos: ofertas primero, luego destacados, luego nuevos
+        productsWithRelations.sort((a, b) => {
+          const getPriority = (p: Product) => {
+            // Verificar si tiene oferta en variante default
+            const defaultVariant = p.variants?.find((v: any) => v.is_default === true);
+            const hasOffer = defaultVariant 
+              ? (defaultVariant.original_price && defaultVariant.original_price > defaultVariant.price)
+              : (p.original_price && p.original_price > p.price);
+            
+            if (hasOffer) return 1;
+            if (p.is_featured) return 2;
+            if (p.is_new) return 3;
+            return 4;
+          };
+          return getPriority(a) - getPriority(b);
+        });
 
         setProducts(productsWithRelations);
       } else {
@@ -138,18 +195,13 @@ export const useProducts = () => {
   useEffect(() => {
     const initializeData = async () => {
       try {
-        
-        // Primero cargar categorías
         const cats = await loadCategories();
-        
-        // Luego cargar productos (que usará las categorías ya cargadas)
+        await loadMetalTypes();
         if (cats.length > 0) {
           await loadProducts();
         } else {
-          // Si no hay categorías, cargar productos sin relaciones de categoría
           await loadProducts();
         }
-        
       } catch (error) {
         console.error('❌ Error inicializando datos:', error);
         setError('Error cargando productos');
@@ -162,10 +214,12 @@ export const useProducts = () => {
   return {
     products,
     categories,
+    metalTypes,
     loading,
     error,
     loadProducts,
     loadProduct,
-    loadCategories
+    loadCategories,
+    loadMetalTypes
   };
 };

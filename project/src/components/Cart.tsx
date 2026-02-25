@@ -125,7 +125,7 @@ const Cart: React.FC<CartProps> = ({
                   <div key={item.id} className="bg-gray-800 rounded-lg p-3 hover:bg-gray-700 transition-colors duration-200">
                     <div className="flex space-x-3">
                       <img
-                        src={buildMediaUrl(item.product?.image)}
+                        src={buildMediaUrl(item.variant?.image || item.product?.image)}
                         alt={item.product?.name || 'Producto'}
                         className="w-14 h-14 object-cover rounded-md border border-gray-600"
                         onError={(e) => {
@@ -139,9 +139,10 @@ const Cart: React.FC<CartProps> = ({
                             <h3 className="font-semibold text-white text-sm mb-0.5 line-clamp-2">
                               {item.product?.name || 'Producto'}
                             </h3>
-                            {item.variant?.name && (
+                            {item.variant && (
                               <p className="text-xs text-yellow-400 font-medium truncate">
-                                {item.variant.name}
+                                {item.variant.model || 'Principal'}
+                                {item.variant.size && ` - ${item.variant.size}`}
                               </p>
                             )}
                           </div>

@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabase';
 import type { CartItem } from '../types';
 import { useAddresses } from '../hooks/useAddresses';
 import type { UserAddress } from '../types';
-import { buildMediaUrl } from '../utils/storage';
+import { buildMediaUrl, getVariantFirstImage } from '../utils/storage';
 
 interface CheckoutCartItem extends CartItem {
   name: string;
@@ -20,10 +20,21 @@ interface ShippingAddress {
   phone: string;
   address: string;
   address_line2: string;
+  exterior_number?: string;
+  interior_number?: string;
   city: string;
   state: string;
   postalCode: string;
   country: string;
+}
+
+interface BillingData {
+  rfc: string;
+  razon_social: string;
+  cp_fiscal: string;
+  regimen_fiscal: string;
+  uso_cfdi: string;
+  email_facturacion?: string;
 }
 
 interface CheckoutProps {
@@ -53,6 +64,8 @@ const Checkout: React.FC<CheckoutProps> = ({
     phone: '',
     address: '',
     address_line2: '',
+    exterior_number: '',
+    interior_number: '',
     city: '',
     postalCode: '',
     country: 'México',
@@ -62,13 +75,52 @@ const Checkout: React.FC<CheckoutProps> = ({
   const [isProcessing, setIsProcessing] = useState(false);
   const [orderCompleted, setOrderCompleted] = useState(false);
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+  const [requiresInvoice, setRequiresInvoice] = useState(false);
+  const [billingData, setBillingData] = useState<BillingData>({
+    rfc: '', razon_social: '', cp_fiscal: '', regimen_fiscal: '', uso_cfdi: '', email_facturacion: ''
+  });
+  const [billingErrors, setBillingErrors] = useState<Record<string, string>>({});
   const { addresses, loading: addressesLoading, create, load } = useAddresses();
   const [selectedAddressId, setSelectedAddressId] = useState<number | null>(null);
   const [selectionError, setSelectionError] = useState('');
   const [addressFeedback, setAddressFeedback] = useState('');
   
+  // Cotización de envío: solo costo (paquetería la elige el sistema por prioridad)
+  const [shippingQuote, setShippingQuote] = useState<{ shipping_cost: number; selected?: { proveedor: string; code_servicio: string; nombre_servicio: string; total: number; courier_id?: number } } | null>(null);
+  const [loadingQuotes, setLoadingQuotes] = useState(false);
+  const [quoteError, setQuoteError] = useState('');
+  
+  // Estado para imágenes de variantes
+  const [variantImages, setVariantImages] = useState<Map<number, string>>(new Map());
+  
   // Ref para evitar duplicados de purchase
   const lastPurchaseEventID = useRef<string | null>(null);
+  
+  // Cargar imágenes de variantes cuando cambian los items
+  useEffect(() => {
+    const loadVariantImages = async () => {
+      const imageMap = new Map<number, string>();
+      
+      for (const item of items) {
+        const variantId = (item as any).variant_id;
+        const productImage = (item as any).product?.image || item.image;
+        const useProductImages = (item as any).variant?.use_product_images;
+        
+        if (variantId) {
+          const image = await getVariantFirstImage(variantId, productImage, useProductImages);
+          if (image) {
+            imageMap.set(variantId, image);
+          }
+        }
+      }
+      
+      setVariantImages(imageMap);
+    };
+    
+    if (items.length > 0) {
+      loadVariantImages();
+    }
+  }, [items]);
 
   // Check if user is authenticated when opening checkout
   useEffect(() => {
@@ -102,7 +154,6 @@ const Checkout: React.FC<CheckoutProps> = ({
             num_items: items.reduce((acc, item) => acc + item.quantity, 0),
             eventID,
           });
-          console.log('Meta Purchase event triggered:', { eventID, value: finalTotal });
         }
         lastPurchaseEventID.current = eventID;
       }
@@ -124,6 +175,8 @@ const Checkout: React.FC<CheckoutProps> = ({
           phone: defaultAddress.phone || '',
           address: defaultAddress.address_line1,
           address_line2: defaultAddress.address_line2 || '',
+          exterior_number: defaultAddress.exterior_number || '',
+          interior_number: defaultAddress.interior_number || '',
           city: defaultAddress.city,
           state: defaultAddress.state || '',
           postalCode: defaultAddress.postal_code || '',
@@ -149,10 +202,11 @@ const Checkout: React.FC<CheckoutProps> = ({
     }).format(price);
   };
 
-  const shippingCost = 15;
+  // Costo de envío: solo disponible tras cotización (no mostrar valor por defecto antes)
+  const shippingCost: number | null = shippingQuote?.shipping_cost ?? null;
   const taxRate = 0.16; // 16% IVA en México
   const tax = totalPrice * taxRate;
-  const finalTotal = totalPrice + shippingCost + tax;
+  const finalTotal = totalPrice + (shippingCost ?? 0) + tax;
 
   const validateForm = (): boolean => {
     const errors: Record<string, string> = {};
@@ -195,6 +249,110 @@ const Checkout: React.FC<CheckoutProps> = ({
     return Object.keys(errors).length === 0;
   };
 
+  const validateBilling = (): boolean => {
+    if (!requiresInvoice) return true;
+    const errors: Record<string, string> = {};
+    if (!billingData.rfc.trim() || !/^[A-Z0-9&Ñ]{12,13}$/.test(billingData.rfc)) {
+      errors.rfc = 'RFC inválido (debe tener 12 o 13 caracteres)';
+    }
+    if (!billingData.razon_social.trim()) {
+      errors.razon_social = 'La razón social es requerida';
+    }
+    if (!billingData.cp_fiscal || !/^[0-9]{5}$/.test(billingData.cp_fiscal)) {
+      errors.cp_fiscal = 'El código postal fiscal debe tener 5 dígitos';
+    }
+    if (!billingData.regimen_fiscal) {
+      errors.regimen_fiscal = 'El régimen fiscal es requerido';
+    }
+    if (!billingData.uso_cfdi) {
+      errors.uso_cfdi = 'El uso de CFDI es requerido';
+    }
+    setBillingErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
+
+  const handleBillingContinue = () => {
+    if (validateBilling()) {
+      setCurrentStep(2);
+    }
+  };
+
+  // Función para obtener cotizaciones de envío
+  const fetchShippingQuotes = async () => {
+    if (!shippingAddress.postalCode || shippingAddress.postalCode.length !== 5) {
+      return;
+    }
+
+    setLoadingQuotes(true);
+    setQuoteError('');
+    
+    try {
+      // Calcular peso total de los productos
+      const totalWeight = items.reduce((sum, item) => {
+        // Asumir 100g por producto si no hay información de peso
+        return sum + (item.quantity * 0.1);
+      }, 0);
+
+      // Obtener dimensiones del paquete (valores por defecto)
+      const packageDimensions = {
+        largo: 20,
+        ancho: 15,
+        alto: 10
+      };
+
+      const quoteRequest = {
+        cp_destino: shippingAddress.postalCode,
+        colonia_destino: shippingAddress.address, // address_line1 = colonia
+        peso: Math.max(0.5, totalWeight), // Mínimo 0.5 kg
+        largo: packageDimensions.largo,
+        ancho: packageDimensions.ancho,
+        alto: packageDimensions.alto,
+        valor_declarado: totalPrice,
+        tipoempaque: 'caja',
+        user_id: user?.id,
+        shipping_provider_id: 1
+      };
+
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/shipping-quote`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session?.access_token || ''}`
+        },
+        body: JSON.stringify(quoteRequest)
+      });
+
+      if (!response.ok) {
+        throw new Error('Error al obtener cotizaciones de envío');
+      }
+
+      const result = await response.json();
+      
+      if (result.shipping_cost != null) {
+        setShippingQuote({
+          shipping_cost: result.shipping_cost,
+          selected: result.selected ? {
+            proveedor: result.selected.proveedor,
+            code_servicio: result.selected.code_servicio,
+            nombre_servicio: result.selected.nombre_servicio,
+            total: result.shipping_cost,
+            courier_id: result.selected.courier_id
+          } : undefined
+        });
+      } else {
+        setQuoteError('No se pudo obtener el costo de envío para esta dirección');
+      }
+    } catch (error) {
+      console.error('Error obteniendo cotizaciones:', error);
+      setQuoteError('Error al obtener costo de envío. Se usará un costo estándar.');
+      setShippingQuote(null);
+    } finally {
+      setLoadingQuotes(false);
+    }
+  };
+
   const handleShippingSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSelectionError('');
@@ -210,6 +368,8 @@ const Checkout: React.FC<CheckoutProps> = ({
           phone: shippingAddress.phone,
           address_line1: shippingAddress.address,
           address_line2: shippingAddress.address_line2,
+          exterior_number: shippingAddress.exterior_number || undefined,
+          interior_number: shippingAddress.interior_number || undefined,
           city: shippingAddress.city,
           state: shippingAddress.state,
           postal_code: shippingAddress.postalCode,
@@ -219,6 +379,9 @@ const Checkout: React.FC<CheckoutProps> = ({
 
         setSelectedAddressId(createdAddress.id);
         setAddressFeedback('Dirección guardada. Revisa y continúa.');
+        
+        // Obtener cotizaciones después de guardar la dirección
+        await fetchShippingQuotes();
       } catch (error) {
         console.error('Error guardando dirección:', error);
         setSelectionError('No pudimos guardar la dirección, intenta nuevamente.');
@@ -231,7 +394,26 @@ const Checkout: React.FC<CheckoutProps> = ({
       return;
     }
 
-    setCurrentStep(2);
+    // Obtener cotizaciones cuando se selecciona una dirección existente
+    const finalAddress = addresses.find(a => a.id === selectedAddressId);
+    if (finalAddress) {
+      setShippingAddress({
+        firstName: finalAddress.name?.split(' ')[0] || '',
+        lastName: finalAddress.name?.split(' ').slice(1).join(' ') || '',
+        email: user?.email || '',
+        phone: finalAddress.phone || '',
+        address: finalAddress.address_line1,
+        address_line2: finalAddress.address_line2 || '',
+        exterior_number: finalAddress.exterior_number || '',
+        interior_number: finalAddress.interior_number || '',
+        city: finalAddress.city,
+        state: finalAddress.state || '',
+        postalCode: finalAddress.postal_code || '',
+        country: finalAddress.country === 'MX' ? 'México' : (finalAddress.country || 'México'),
+      });
+      await fetchShippingQuotes();
+    }
+    setCurrentStep(3);
   };
 
   const handlePaymentSubmit = async (e: React.FormEvent) => {
@@ -290,10 +472,16 @@ const Checkout: React.FC<CheckoutProps> = ({
       shipping: shippingAddress,
       selectedAddressId: finalAddressId,
       shipping_address_id: finalAddressId,
-      shipping_snapshot: finalAddressSnapshot
+      shipping_snapshot: finalAddressSnapshot,
+      shipping_quote: shippingQuote?.selected ? {
+        proveedor: shippingQuote.selected.proveedor,
+        code_servicio: shippingQuote.selected.code_servicio,
+        nombre_servicio: shippingQuote.selected.nombre_servicio,
+        precio: shippingQuote.shipping_cost,
+        courier_id: shippingQuote.selected.courier_id
+      } : null,
+      billing_snapshot: requiresInvoice ? billingData : null
     };
-
-      console.log('Enviando a Supabase Edge:', requestPayload);
 
       // Llamar a la función Edge
       const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/create-stripe-session`, {
@@ -312,8 +500,7 @@ const Checkout: React.FC<CheckoutProps> = ({
       }
   
       const result = await response.json();
-      console.log('Respuesta de Supabase Edge:', result);
-  
+
       // Verificar URL de Stripe
       if (!result.url) {
         throw new Error('No se recibió la URL de redirección de Stripe');
@@ -357,6 +544,8 @@ const Checkout: React.FC<CheckoutProps> = ({
       phone: '',
       address: '',
       address_line2: '',
+      exterior_number: '',
+      interior_number: '',
       city: '',
       postalCode: '',
       country: 'México',
@@ -402,16 +591,16 @@ const Checkout: React.FC<CheckoutProps> = ({
               {!orderCompleted && (
                 <div className="flex items-center justify-center mb-6">
                   <div className="flex items-center space-x-3">
-                    {[1, 2].map((step) => (
+                    {[1, 2, 3].map((step) => (
                       <div key={step} className="flex items-center">
                         <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs ${
-                          currentStep >= step 
-                            ? 'bg-gradient-to-r from-yellow-400 to-yellow-600 text-black' 
+                          currentStep >= step
+                            ? 'bg-gradient-to-r from-yellow-400 to-yellow-600 text-black'
                             : 'bg-gray-700 text-gray-400'
                         }`}>
                           {step}
                         </div>
-                        {step < 2 && (
+                        {step < 3 && (
                           <div className={`w-12 h-1 mx-2 ${
                             currentStep > step ? 'bg-yellow-400' : 'bg-gray-700'
                           }`}></div>
@@ -429,8 +618,138 @@ const Checkout: React.FC<CheckoutProps> = ({
                 <p className="text-green-400 text-xs mb-2">{addressFeedback}</p>
               )}
 
-              {/* Step 1: Shipping Address */}
+              {/* Step 1: Facturación */}
               {currentStep === 1 && (
+                <div className="space-y-4">
+                  <h3 className="text-lg font-bold text-white mb-4">Datos de Facturación</h3>
+
+                  {/* Toggle */}
+                  <div className="flex items-center justify-between bg-gray-800/40 rounded-lg p-4 border border-gray-700">
+                    <div>
+                      <p className="text-white font-medium text-sm">¿Requieres factura?</p>
+                      <p className="text-gray-400 text-xs mt-0.5">Solicita tu CFDI con tus datos fiscales</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => { setRequiresInvoice(!requiresInvoice); setBillingErrors({}); }}
+                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-300 focus:outline-none ${
+                        requiresInvoice ? 'bg-yellow-400' : 'bg-gray-600'
+                      }`}
+                    >
+                      <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform duration-300 ${
+                        requiresInvoice ? 'translate-x-6' : 'translate-x-1'
+                      }`} />
+                    </button>
+                  </div>
+
+                  {/* Formulario fiscal */}
+                  {requiresInvoice && (
+                    <div className="space-y-3">
+                      <div>
+                        <label className="block text-xs font-medium text-gray-300 mb-1">RFC *</label>
+                        <input
+                          type="text"
+                          maxLength={13}
+                          value={billingData.rfc}
+                          onChange={(e) => setBillingData({ ...billingData, rfc: e.target.value.toUpperCase() })}
+                          className={`w-full px-3 py-2 bg-gray-800 border rounded-lg text-sm text-white focus:outline-none transition-colors duration-300 ${
+                            billingErrors.rfc ? 'border-red-500' : 'border-gray-600 focus:border-yellow-400'
+                          }`}
+                          placeholder="XAXX010101000"
+                        />
+                        {billingErrors.rfc && <p className="text-red-400 text-xs mt-0.5">{billingErrors.rfc}</p>}
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-medium text-gray-300 mb-1">Razón Social / Nombre Fiscal *</label>
+                        <input
+                          type="text"
+                          value={billingData.razon_social}
+                          onChange={(e) => setBillingData({ ...billingData, razon_social: e.target.value })}
+                          className={`w-full px-3 py-2 bg-gray-800 border rounded-lg text-sm text-white focus:outline-none transition-colors duration-300 ${
+                            billingErrors.razon_social ? 'border-red-500' : 'border-gray-600 focus:border-yellow-400'
+                          }`}
+                          placeholder="Tu nombre fiscal o razón social"
+                        />
+                        {billingErrors.razon_social && <p className="text-red-400 text-xs mt-0.5">{billingErrors.razon_social}</p>}
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-medium text-gray-300 mb-1">Código Postal Fiscal *</label>
+                        <input
+                          type="text"
+                          maxLength={5}
+                          value={billingData.cp_fiscal}
+                          onChange={(e) => setBillingData({ ...billingData, cp_fiscal: e.target.value.replace(/\D/g, '') })}
+                          className={`w-full px-3 py-2 bg-gray-800 border rounded-lg text-sm text-white focus:outline-none transition-colors duration-300 ${
+                            billingErrors.cp_fiscal ? 'border-red-500' : 'border-gray-600 focus:border-yellow-400'
+                          }`}
+                          placeholder="12345"
+                        />
+                        {billingErrors.cp_fiscal && <p className="text-red-400 text-xs mt-0.5">{billingErrors.cp_fiscal}</p>}
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-medium text-gray-300 mb-1">Régimen Fiscal *</label>
+                        <select
+                          value={billingData.regimen_fiscal}
+                          onChange={(e) => setBillingData({ ...billingData, regimen_fiscal: e.target.value })}
+                          className={`w-full px-3 py-2 bg-gray-800 border rounded-lg text-sm text-white focus:outline-none transition-colors duration-300 ${
+                            billingErrors.regimen_fiscal ? 'border-red-500' : 'border-gray-600 focus:border-yellow-400'
+                          }`}
+                        >
+                          <option value="">Selecciona régimen fiscal</option>
+                          <option value="601">601 – General de Ley Personas Morales</option>
+                          <option value="612">612 – Personas Físicas con Act. Empresariales</option>
+                          <option value="616">616 – Sin obligaciones fiscales</option>
+                          <option value="626">626 – Régimen Simplificado de Confianza</option>
+                        </select>
+                        {billingErrors.regimen_fiscal && <p className="text-red-400 text-xs mt-0.5">{billingErrors.regimen_fiscal}</p>}
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-medium text-gray-300 mb-1">Uso CFDI *</label>
+                        <select
+                          value={billingData.uso_cfdi}
+                          onChange={(e) => setBillingData({ ...billingData, uso_cfdi: e.target.value })}
+                          className={`w-full px-3 py-2 bg-gray-800 border rounded-lg text-sm text-white focus:outline-none transition-colors duration-300 ${
+                            billingErrors.uso_cfdi ? 'border-red-500' : 'border-gray-600 focus:border-yellow-400'
+                          }`}
+                        >
+                          <option value="">Selecciona uso de CFDI</option>
+                          <option value="G01">G01 – Adquisición de mercancías</option>
+                          <option value="G03">G03 – Gastos en general</option>
+                          <option value="I01">I01 – Construcciones</option>
+                          <option value="P01">P01 – Por definir</option>
+                        </select>
+                        {billingErrors.uso_cfdi && <p className="text-red-400 text-xs mt-0.5">{billingErrors.uso_cfdi}</p>}
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-medium text-gray-300 mb-1">Email de facturación (opcional)</label>
+                        <input
+                          type="email"
+                          value={billingData.email_facturacion || ''}
+                          onChange={(e) => setBillingData({ ...billingData, email_facturacion: e.target.value })}
+                          className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-lg text-sm text-white focus:border-yellow-400 focus:outline-none transition-colors duration-300"
+                          placeholder="facturacion@empresa.com"
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={handleBillingContinue}
+                    className="w-full bg-gradient-to-r from-yellow-400 via-yellow-500 to-yellow-600 text-black py-3 px-4 rounded-lg font-bold text-sm tracking-wide hover:shadow-lg hover:shadow-yellow-500/25 transition-all duration-300 transform hover:scale-105"
+                  >
+                    CONTINUAR
+                  </button>
+                </div>
+              )}
+
+              {/* Step 2: Shipping Address */}
+              {currentStep === 2 && (
                 <form onSubmit={handleShippingSubmit} className="space-y-4">
                   <h3 className="text-lg font-bold text-white mb-4">Información de Envío</h3>
 
@@ -457,6 +776,8 @@ const Checkout: React.FC<CheckoutProps> = ({
                                   phone: a.phone || '',
                                   address: a.address_line1,
                                   address_line2: a.address_line2 || '',
+                                  exterior_number: a.exterior_number || '',
+                                  interior_number: a.interior_number || '',
                                   city: a.city,
                                   state: a.state || '',
                                   postalCode: a.postal_code || '',
@@ -633,8 +954,30 @@ const Checkout: React.FC<CheckoutProps> = ({
                           value={shippingAddress.address_line2 || ''}
                           onChange={(e) => setShippingAddress({...shippingAddress, address_line2: e.target.value})}
                           className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-lg text-sm text-white focus:border-yellow-400 focus:outline-none transition-colors duration-300"
-                          placeholder="Calle Principal #123, Interior 4"
+                          placeholder="Calle Principal #123"
                         />
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-xs font-medium text-gray-300 mb-1">Núm. exterior</label>
+                          <input
+                            type="text"
+                            value={shippingAddress.exterior_number || ''}
+                            onChange={(e) => setShippingAddress({...shippingAddress, exterior_number: e.target.value})}
+                            className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-lg text-sm text-white focus:border-yellow-400 focus:outline-none transition-colors duration-300"
+                            placeholder="123"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-gray-300 mb-1">Núm. interior</label>
+                          <input
+                            type="text"
+                            value={shippingAddress.interior_number || ''}
+                            onChange={(e) => setShippingAddress({...shippingAddress, interior_number: e.target.value})}
+                            className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-lg text-sm text-white focus:border-yellow-400 focus:outline-none transition-colors duration-300"
+                            placeholder="4 (opcional)"
+                          />
+                        </div>
                       </div>
 
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -705,26 +1048,63 @@ const Checkout: React.FC<CheckoutProps> = ({
                 </form>
               )}
               
-              {/* Step 2: Payment */}
-              {currentStep === 2 && (
+              {/* Step 3: Payment */}
+              {currentStep === 3 && (
                 <div className="space-y-4">
                   <h3 className="text-lg font-bold text-white mb-4">Confirma tu pedido</h3>
+
+                  {/* Costo de envío (paquetería asignada por prioridad, sin selección) */}
+                  <div className="bg-gray-800/30 rounded-lg p-4 border border-gray-700">
+                    <h4 className="font-semibold text-white mb-3">Envío</h4>
+                    {loadingQuotes ? (
+                      <p className="text-gray-400 text-sm">Calculando costo de envío...</p>
+                    ) : quoteError ? (
+                      <p className="text-amber-400 text-sm">{quoteError}</p>
+                    ) : shippingCost !== null ? (
+                      <div className="space-y-1">
+                        <p className="text-white">
+                          Costo de envío: <span className="font-bold text-yellow-400">{formatPrice(shippingCost)}</span>
+                        </p>
+                        {shippingQuote?.selected && (
+                          <p className="text-xs text-gray-400">
+                            {shippingQuote.selected.proveedor}
+                            {shippingQuote.selected.nombre_servicio ? ` · ${shippingQuote.selected.nombre_servicio}` : ''}
+                            {shippingQuote.selected.tiempo_de_entrega ? ` · ${shippingQuote.selected.tiempo_de_entrega} días hábiles` : ''}
+                          </p>
+                        )}
+                      </div>
+                    ) : (
+                      <p className="text-gray-400 text-sm">Se calculará al confirmar la dirección</p>
+                    )}
+                  </div>
 
                   <div className="bg-gray-800/30 rounded-lg p-4 border border-gray-700">
                     <h4 className="font-semibold text-white mb-3">Resumen del pedido</h4>
                     <div className="space-y-3 max-h-48 overflow-y-auto pr-2">
-                      {items.map(item => (
+                      {items.map(item => {
+                        // Obtener imagen de la variante usando la función helper
+                        const variantId = (item as any).variant_id;
+                        const productImage = (item as any).product?.image || item.image;
+                        const variantImage = variantId ? variantImages.get(variantId) : null;
+                        const itemImage = variantImage || productImage;
+                        const variantModel = (item as any).variant?.model;
+                        const variantSize = (item as any).variant?.size;
+                        
+                        return (
                         <div key={item.id} className="flex space-x-2">
                           <img
-                            src={buildMediaUrl(item.image)}
+                            src={buildMediaUrl(itemImage)}
                             alt={item.name}
                             className="w-10 h-10 object-cover rounded"
                           />
                           <div className="flex-1 min-w-0">
                             <h4 className="text-xs font-medium text-white line-clamp-2">
                               {item.name}
-                              {item.variant_name && (
-                                <span className="block text-xs text-yellow-400 font-medium">{item.variant_name}</span>
+                              {(variantModel || variantSize) && (
+                                <span className="block text-xs text-yellow-400 font-medium">
+                                  {variantModel || 'Principal'}
+                                  {variantSize && ` - ${variantSize}`}
+                                </span>
                               )}
                             </h4>
                             <div className="flex justify-between items-center mt-0.5">
@@ -733,7 +1113,8 @@ const Checkout: React.FC<CheckoutProps> = ({
                             </div>
                           </div>
                         </div>
-                      ))}
+                        );
+                      })}
                     </div>
                     <div className="border-t border-gray-600 pt-3 space-y-2 mt-3 text-xs">
                       <div className="flex justify-between">
@@ -742,7 +1123,9 @@ const Checkout: React.FC<CheckoutProps> = ({
                       </div>
                       <div className="flex justify-between">
                         <span className="text-gray-300">Envío:</span>
-                        <span className="text-white font-medium">{formatPrice(shippingCost)}</span>
+                        <span className="text-white font-medium">
+                          {shippingCost !== null ? formatPrice(shippingCost) : <span className="text-gray-500 italic">Por calcular</span>}
+                        </span>
                       </div>
                       <div className="flex justify-between">
                         <span className="text-gray-300">IVA (16%):</span>
@@ -750,7 +1133,9 @@ const Checkout: React.FC<CheckoutProps> = ({
                       </div>
                       <div className="flex justify-between text-sm pt-2 border-t border-gray-600">
                         <span className="font-bold text-white">Total:</span>
-                        <span className="font-bold text-yellow-400">{formatPrice(finalTotal)}</span>
+                        <span className="font-bold text-yellow-400">
+                          {shippingCost !== null ? formatPrice(finalTotal) : <span className="text-gray-400 italic text-xs">Pendiente de envío</span>}
+                        </span>
                       </div>
                     </div>
                   </div>
@@ -759,8 +1144,10 @@ const Checkout: React.FC<CheckoutProps> = ({
                     <h4 className="font-semibold text-white mb-3">Dirección de envío</h4>
                     <div className="text-xs text-gray-300 space-y-0.5">
                       <p className="font-medium text-white">{shippingAddress.firstName} {shippingAddress.lastName}</p>
-                      <p>{shippingAddress.address}</p>
-                      {shippingAddress.address_line2 && <p>{shippingAddress.address_line2}</p>}
+                      {shippingAddress.address_line2 && (
+                        <p>{shippingAddress.address_line2}{(shippingAddress.exterior_number || shippingAddress.interior_number) ? ` ${[shippingAddress.exterior_number, shippingAddress.interior_number].filter(Boolean).join(' int. ')}` : ''}</p>
+                      )}
+                      {shippingAddress.address && <p>Col. {shippingAddress.address}</p>}
                       <p>{shippingAddress.city}, {shippingAddress.state} {shippingAddress.postalCode}</p>
                       <p>{shippingAddress.country}</p>
                       <p>Tel: {shippingAddress.phone}</p>
@@ -803,8 +1190,8 @@ const Checkout: React.FC<CheckoutProps> = ({
                 </div>
               )}
               
-              {/* Step 3: Order Confirmation */}
-              {currentStep === 3 && orderCompleted && (
+              {/* Step 4: Order Confirmation */}
+              {currentStep === 4 && orderCompleted && (
                 <div className="text-center space-y-4">
                   <div className="w-16 h-16 bg-gradient-to-r from-green-400 to-green-600 rounded-full flex items-center justify-center mx-auto">
                     <Check className="h-8 w-8 text-white" />
@@ -854,7 +1241,9 @@ const Checkout: React.FC<CheckoutProps> = ({
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-400">Envío:</span>
-                  <span className="text-white">{formatPrice(shippingCost)}</span>
+                  <span className="text-white">
+                    {shippingCost !== null ? formatPrice(shippingCost) : <span className="text-gray-500 italic text-xs">Por calcular</span>}
+                  </span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-400">IVA (16%):</span>
@@ -863,7 +1252,9 @@ const Checkout: React.FC<CheckoutProps> = ({
                 <div className="border-t border-gray-600 pt-2">
                   <div className="flex justify-between">
                     <span className="font-bold text-white">Total:</span>
-                    <span className="font-bold text-gray-300">{formatPrice(finalTotal)}</span>
+                    <span className="font-bold text-gray-300">
+                      {shippingCost !== null ? formatPrice(finalTotal) : <span className="text-gray-500 italic text-xs">+ envío</span>}
+                    </span>
                   </div>
                 </div>
               </div>

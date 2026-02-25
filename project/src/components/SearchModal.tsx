@@ -15,9 +15,10 @@ const SearchModal: React.FC<SearchModalProps> = ({
   isOpen,
   onClose,
 }) => {
-  const { products, categories, loading } = useProducts();
+  const { products, categories, metalTypes, loading } = useProducts();
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('all');
+  const [selectedMetalTypeId, setSelectedMetalTypeId] = useState<string>('all');
   const [priceRange, setPriceRange] = useState({ min: 0, max: 100000 });
   const [showFilters, setShowFilters] = useState(false);
   const [sortBy, setSortBy] = useState('name');
@@ -123,7 +124,10 @@ const SearchModal: React.FC<SearchModalProps> = ({
   
     filtered = filtered.filter(product => {
       const { price } = getProductDetails(product);
-      return price >= priceRange.min && price <= priceRange.max;
+      const matchesPrice = price >= priceRange.min && price <= priceRange.max;
+      const matchesMetalType = selectedMetalTypeId === 'all' ||
+        (product.variants && product.variants.some((v: any) => v.metal_type != null && String(v.metal_type) === selectedMetalTypeId));
+      return matchesPrice && matchesMetalType;
     });
   
     if (sortBy === 'featured') {
@@ -158,7 +162,7 @@ const SearchModal: React.FC<SearchModalProps> = ({
     });
   
     return filtered;
-  }, [products, searchTerm, selectedCategory, priceRange, sortBy, showOnlyDiscounted, categories]);
+  }, [products, searchTerm, selectedCategory, selectedMetalTypeId, priceRange, sortBy, showOnlyDiscounted, categories]);
 
   const formatPrice = (price: number) => {
     return new Intl.NumberFormat('es-MX', {
@@ -171,6 +175,7 @@ const SearchModal: React.FC<SearchModalProps> = ({
     if (!isOpen) {
       setSearchTerm('');
       setSelectedCategory('all');
+      setSelectedMetalTypeId('all');
       setPriceRange({ min: 0, max: 100000 });
       setShowFilters(false);
       setSortBy('name');
@@ -316,7 +321,7 @@ const SearchModal: React.FC<SearchModalProps> = ({
           <input
             type="text"
             className="w-full bg-gray-800 text-white rounded p-2 border border-gray-700 focus:ring-1 focus:ring-yellow-400 text-sm placeholder-gray-400"
-            placeholder="Buscar por nombre, material, modelo..."
+            placeholder="Buscar por nombre, material, modelo, metal..."
             value={searchTerm}
             onChange={e => setSearchTerm(e.target.value)}
             autoFocus
@@ -345,6 +350,17 @@ const SearchModal: React.FC<SearchModalProps> = ({
               <option value="all">Todas las categorías</option>
               {categories.map(category => (
                 <option key={category.id} value={category.name}>{category.name}</option>
+              ))}
+            </select>
+
+            <select
+              value={selectedMetalTypeId}
+              onChange={(e) => setSelectedMetalTypeId(e.target.value)}
+              className="px-2.5 py-1.5 bg-gray-800 border border-gray-600 rounded text-white text-xs focus:outline-none"
+            >
+              <option value="all">Todos los metales</option>
+              {metalTypes.map(mt => (
+                <option key={mt.id} value={mt.id}>{mt.name}</option>
               ))}
             </select>
 

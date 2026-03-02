@@ -1,5 +1,5 @@
 import React from 'react';
-import { Sparkles, ArrowRight } from 'lucide-react';
+import { ArrowRight, Shield, Truck, Star } from 'lucide-react';
 
 interface HeroProps {
   onShopNow: () => void;
@@ -12,72 +12,125 @@ const Hero: React.FC<HeroProps> = ({ onShopNow }) => {
       grid.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
   };
-  
+
   return (
-    <section className="relative h-[85vh] md:h-[90vh] bg-gradient-to-br from-black to-black overflow-hidden">
-      {/* Background image */}
+    <section className="relative min-h-screen bg-black overflow-hidden">
+
+      {/* Imagen de fondo */}
       <div className="absolute inset-0">
-        <img 
+        <img
           src="https://images.pexels.com/photos/1191531/pexels-photo-1191531.jpeg?auto=compress&cs=tinysrgb&w=1920"
           alt="Luxury jewelry"
-          className="w-full h-full object-cover opacity-40"
+          className="w-full h-full object-cover opacity-60"
         />
-        <div className="absolute inset-0 bg-gradient-to-r from-black/10 via-black/30 to-transparent"></div>
+        <div className="absolute inset-0 bg-gradient-to-r from-black via-black/60 to-black/10" />
+        <div className="absolute inset-0 bg-gradient-to-t from-black via-transparent to-black/30" />
       </div>
 
-      {/* Floating elements - más pequeños */}
-      <div className="absolute top-12 left-8 opacity-20">
-        <Sparkles className="h-4 w-4 text-gray-300 animate-pulse" />
-      </div>
-      <div className="absolute top-32 right-16 opacity-20">
-        <Sparkles className="h-3 w-3 text-gray-300 animate-pulse" style={{ animationDelay: '1s' }} />
-      </div>
-      <div className="absolute bottom-32 left-1/4 opacity-20">
-        <Sparkles className="h-3.5 w-3.5 text-gray-300 animate-pulse" style={{ animationDelay: '2s' }} />
+      {/* Línea dorada lateral */}
+      <div className="absolute left-0 top-0 bottom-0 w-px bg-gradient-to-b from-transparent via-yellow-400/30 to-transparent" />
+
+      {/* Texto vertical editorial — solo desktop */}
+      <div className="absolute left-5 top-1/2 -translate-y-1/2 hidden lg:flex flex-col items-center gap-3">
+        <div className="w-px h-14 bg-gradient-to-b from-transparent to-yellow-400/40" />
+        <span
+          className="text-[9px] tracking-[0.45em] text-gray-500 uppercase font-medium"
+          style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}
+        >
+          Alta Joyería
+        </span>
+        <div className="w-px h-14 bg-gradient-to-t from-transparent to-yellow-400/40" />
       </div>
 
-      {/* Content */}
-      <div className="relative z-10 h-full flex items-center">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="max-w-2xl">
-            {/* Badge más pequeño */}
-            <div className="mb-4">
-              <span className="text-[0.65rem] md:text-[0.70rem] inline-block px-3 py-1.5 bg-gradient-to-r from-gray-300/20 to-gray-500/20 border border-gray-300/30 rounded-full text-gray-300 font-medium tracking-wider">
-                COLECCIÓN 2025
+      {/* Contenido principal */}
+      <div className="relative z-10 min-h-screen flex flex-col justify-center">
+        <div className="max-w-6xl mx-auto px-6 sm:px-10 lg:px-20 w-full py-24">
+          <div className="max-w-2xl xl:max-w-3xl">
+
+            {/* Badge */}
+            <div className="flex items-center gap-3 mb-8">
+              <div className="h-px w-8 bg-yellow-400/70" />
+              <span className="text-[0.62rem] tracking-[0.4em] text-yellow-400/90 uppercase font-semibold">
+                Colección 2026
               </span>
             </div>
-            
-            {/* Títulos más pequeños */}
-            <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold mb-6 leading-snug">
-              <span className="block text-white">ELEGANCIA</span>
-              <span className="block bg-gradient-to-r from-gray-300 via-gray-400 to-gray-500 bg-clip-text text-transparent">
-                INFINITA
+
+            {/* Título editorial */}
+            <h1 className="mb-7 leading-none">
+              <span className="block text-5xl sm:text-6xl lg:text-[5.5rem] xl:text-[6.5rem] font-thin text-white/90 tracking-tight">
+                Elegancia
+              </span>
+              <span className="block text-5xl sm:text-6xl lg:text-[5.5rem] xl:text-[6.5rem] font-bold text-white tracking-tight">
+                Infinita
+              </span>
+              <span className="block text-lg sm:text-xl lg:text-2xl font-light text-yellow-400/75 tracking-[0.2em] mt-3">
+                — en cada pieza
               </span>
             </h1>
-            
-            {/* Texto más pequeño y compacto */}
-            <p className="text-base md:text-lg text-gray-300 mb-10 leading-relaxed max-w-xl">
-              Descubre joyas de lujo donde cada pieza cuenta una historia de 
-              <span className="text-gray-300 font-medium"> artesanía exquisita</span> y 
-              <span className="text-gray-300 font-medium"> elegancia atemporal</span>.
+
+            {/* Descripción */}
+            <p className="text-sm sm:text-base text-gray-400 mb-10 leading-relaxed max-w-md">
+              Joyería artesanal de alta calidad. Cada pieza es elaborada con
+              materiales seleccionados para quienes aprecian la verdadera elegancia.
             </p>
-            
-            {/* Botones más pequeños */}
-            <div className="flex flex-col sm:flex-row space-y-3 sm:space-y-0 sm:space-x-4">
-              <button 
+
+            {/* CTA */}
+            <div className="mb-16">
+              <button
                 onClick={handleExplore}
-                className="group bg-gradient-to-r from-gray-300 via-gray-400 to-gray-500 text-black px-6 py-3 rounded-lg font-bold text-base tracking-wide hover:shadow-xl hover:shadow-gray-400/20 transition-all duration-300 transform hover:scale-102 flex items-center justify-center space-x-2"
+                className="group flex items-center justify-center gap-3 bg-gradient-to-r from-yellow-400 via-yellow-500 to-yellow-600 text-black px-8 py-3.5 rounded-full font-bold text-sm tracking-[0.15em] hover:shadow-xl hover:shadow-yellow-500/25 transition-all duration-300 cursor-pointer"
               >
                 <span>EXPLORAR COLECCIÓN</span>
-                <ArrowRight className="h-4 w-4 group-hover:translate-x-1 transition-transform duration-300" />
+                <ArrowRight className="h-4 w-4 transition-transform duration-300 group-hover:translate-x-1" />
               </button>
             </div>
+
+            {/* Trust indicators */}
+            <div className="flex flex-wrap items-center gap-6 sm:gap-8">
+              <div className="flex items-center gap-2.5">
+                <div className="p-1.5 rounded-full bg-yellow-400/10 border border-yellow-400/20">
+                  <Star className="h-3.5 w-3.5 text-yellow-400 fill-yellow-400" />
+                </div>
+                <div>
+                  <p className="text-white text-xs font-semibold leading-none mb-0.5">4.9 / 5</p>
+                  <p className="text-gray-500 text-[10px]">Clientes satisfechos</p>
+                </div>
+              </div>
+              <div className="hidden sm:block w-px h-7 bg-gray-700/70" />
+              <div className="flex items-center gap-2.5">
+                <div className="p-1.5 rounded-full bg-yellow-400/10 border border-yellow-400/20">
+                  <Shield className="h-3.5 w-3.5 text-yellow-400" />
+                </div>
+                <div>
+                  <p className="text-white text-xs font-semibold leading-none mb-0.5">Garantía</p>
+                  <p className="text-gray-500 text-[10px]">En todos los productos</p>
+                </div>
+              </div>
+              <div className="hidden sm:block w-px h-7 bg-gray-700/70" />
+              <div className="flex items-center gap-2.5">
+                <div className="p-1.5 rounded-full bg-yellow-400/10 border border-yellow-400/20">
+                  <Truck className="h-3.5 w-3.5 text-yellow-400" />
+                </div>
+                <div>
+                  <p className="text-white text-xs font-semibold leading-none mb-0.5">Envío seguro</p>
+                  <p className="text-gray-500 text-[10px]">A todo México</p>
+                </div>
+              </div>
+            </div>
+
           </div>
         </div>
       </div>
-      
-      {/* Bottom gradient más pequeño */}
-      <div className="absolute bottom-0 left-0 right-0 h-20 bg-gradient-to-t from-black to-transparent"></div>
+
+      {/* Indicador de scroll */}
+      <div className="absolute bottom-8 left-1/2 -translate-x-1/2 flex flex-col items-center gap-1.5 opacity-40">
+        <div className="w-px h-10 bg-gradient-to-b from-white/0 to-white/60 animate-pulse" />
+        <span className="text-[9px] tracking-[0.3em] text-gray-400 uppercase">Scroll</span>
+      </div>
+
+      {/* Gradiente inferior */}
+      <div className="absolute bottom-0 left-0 right-0 h-28 bg-gradient-to-t from-black to-transparent" />
+
     </section>
   );
 };

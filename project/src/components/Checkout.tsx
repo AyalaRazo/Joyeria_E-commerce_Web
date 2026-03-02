@@ -786,7 +786,13 @@ const Checkout: React.FC<CheckoutProps> = ({
                                 {a.is_default && <span className="text-xs text-yellow-400">(Predeterminada)</span>}
                               </div>
                               <div className="text-gray-300">{a.address_line1}</div>
-                              {a.address_line2 && <div className="text-gray-400">{a.address_line2}</div>}
+                              {a.address_line2 && (
+                                <div className="text-gray-400">
+                                  {a.address_line2}
+                                  {a.exterior_number ? ` #${a.exterior_number}` : ''}
+                                  {a.interior_number ? ` Int. ${a.interior_number}` : ''}
+                                </div>
+                              )}
                               <div className="text-gray-400">{a.city}{a.state ? `, ${a.state}` : ''} {a.postal_code || ''}</div>
                               <div className="text-gray-500">{a.country || 'MX'} {a.phone ? `· ${a.phone}` : ''}</div>
                             </div>
@@ -1147,7 +1153,11 @@ const Checkout: React.FC<CheckoutProps> = ({
                     <div className="text-xs text-gray-300 space-y-0.5">
                       <p className="font-medium text-white">{shippingAddress.firstName} {shippingAddress.lastName}</p>
                       {shippingAddress.address_line2 && (
-                        <p>{shippingAddress.address_line2}{(shippingAddress.exterior_number || shippingAddress.interior_number) ? ` ${[shippingAddress.exterior_number, shippingAddress.interior_number].filter(Boolean).join(' int. ')}` : ''}</p>
+                        <p>
+                          {shippingAddress.address_line2}
+                          {shippingAddress.exterior_number ? ` #${shippingAddress.exterior_number}` : ''}
+                          {shippingAddress.interior_number ? ` Int. ${shippingAddress.interior_number}` : ''}
+                        </p>
                       )}
                       {shippingAddress.address && <p>Col. {shippingAddress.address}</p>}
                       <p>{shippingAddress.city}, {shippingAddress.state} {shippingAddress.postalCode}</p>

@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase';
 import { motion } from "framer-motion";
 
 import { Product, Order, ProductVariant, UserRole, Courier, SalesSummary, SalesFinancial, CourierPerformance, ShippingSummary } from '../types';
-import { Search, Package, RefreshCw, X, Save, Edit, Plus, Trash2, RotateCcw, Eye, AlertCircle, Filter, TrendingUp, Users, Truck, MapPin, Coins, DollarSign } from 'lucide-react';
+import { Search, Package, RefreshCw, X, Save, Edit, Plus, Trash2, RotateCcw, Eye, AlertCircle, Filter, TrendingUp, Users, Truck, MapPin, Coins, DollarSign, ChevronDown, Tag, Image, FileText } from 'lucide-react';
 import {
   LineChart,
   Line,
@@ -121,7 +121,7 @@ const AdminPanel: React.FC = () => {
     weight_grams: 100,
     is_high_value: false,
     requires_special_shipping: false,
-    is_active: false,
+    is_active: true,
     metal_type: null as number | null,
     carat: undefined as number | undefined,
     product_image_mode: 'base' as 'base' | 'variant'
@@ -228,6 +228,9 @@ const AdminPanel: React.FC = () => {
     orderId: number | null;
   }>({ show: false, orderId: null });
   const [orderDetails, setOrderDetails] = useState<any>(null);
+  const [cancelGuideState, setCancelGuideState] = useState<'idle' | 'confirming' | 'loading'>('idle');
+  const [cancelGuideMotivo, setCancelGuideMotivo] = useState('');
+  const [cancelGuideError, setCancelGuideError] = useState('');
   const [showProductDetails, setShowProductDetails] = useState<{
     show: boolean;
     productId: number | null;
@@ -235,6 +238,7 @@ const AdminPanel: React.FC = () => {
   const [productDetails, setProductDetails] = useState<Product | null>(null);
   const [imagesToDelete, setImagesToDelete] = useState<number[]>([]);
   const [variantImagesToDelete, setVariantImagesToDelete] = useState<number[]>([]);
+  const [expandedProducts, setExpandedProducts] = useState<Set<number | string>>(new Set());
 
   // Fetch data based on active tab
   useEffect(() => {
@@ -519,11 +523,15 @@ const fetchOrderDetails = async (orderId: number) => {
 
     const { data: snapshotData } = await supabase
       .from('orders')
-      .select('shipping_snapshot')
+      .select('shipping_snapshot, billing_snapshot')
       .eq('id', orderId)
       .maybeSingle();
 
-    setOrderDetails({ ...detailedOrder, shipping_snapshot: snapshotData?.shipping_snapshot });
+    setOrderDetails({
+      ...detailedOrder,
+      shipping_snapshot: snapshotData?.shipping_snapshot,
+      billing_snapshot: snapshotData?.billing_snapshot ?? null,
+    });
 
     const { data: itemsData, error: itemsError } = await supabase
       .from('order_items')
@@ -542,6 +550,45 @@ const fetchOrderDetails = async (orderId: number) => {
   }
 };
 
+
+  const handleCancelGuide = async () => {
+    if (!orderDetails) return;
+    setCancelGuideState('loading');
+    setCancelGuideError('');
+    try {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.access_token) headers['Authorization'] = `Bearer ${session.access_token}`;
+      const baseUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1`;
+
+      const resp = await fetch(`${baseUrl}/shipping-cancel-guide`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          order_id: orderDetails.order_id || orderDetails.id,
+          motivo: cancelGuideMotivo || 'Cancelación solicitada por administrador'
+        })
+      });
+
+      const data = await resp.json();
+
+      if (!resp.ok || !data.success) {
+        setCancelGuideError(data.error || 'Error al cancelar la guía');
+        setCancelGuideState('confirming');
+        return;
+      }
+
+      // Recargar detalles de la orden para reflejar el nuevo estado
+      const orderId = orderDetails.order_id || orderDetails.id;
+      await fetchOrderDetails(orderId);
+      setCancelGuideState('idle');
+      setCancelGuideMotivo('');
+      setCancelGuideError('');
+    } catch (err) {
+      setCancelGuideError(err instanceof Error ? err.message : 'Error desconocido');
+      setCancelGuideState('confirming');
+    }
+  };
 
   // Removido: handleCourierUpdate - edición de courier deshabilitada
 
@@ -706,15 +753,18 @@ const fetchOrderDetails = async (orderId: number) => {
       // Clasificar producto
       const classification = classifyProduct(newProduct);
 
+      // Extraer product_image_mode (campo de UI, no existe en la tabla products)
+      const { product_image_mode, ...productFields } = newProduct;
+
       const { data: inserted, error } = await supabase
         .from('products')
-        .insert([{ 
-          ...newProduct, 
+        .insert([{
+          ...productFields,
           image: mainImageUrl,
           weight_grams: newProduct.weight_grams || 100,
           is_high_value: classification.isHighValue,
           requires_special_shipping: classification.requiresSpecialShipping,
-          is_active: newProduct.is_active ?? true
+          is_active: newProduct.is_active,
         }])
         .select('*')
         .single();
@@ -867,14 +917,20 @@ const fetchOrderDetails = async (orderId: number) => {
 
       if (error) throw error;
 
-      // Actualizar metal_type y carat del modelo principal (variante default)
+      // Sincronizar campos clave del producto a la variante default
       const defaultVariant = variants[product.id]?.find((v: ProductVariant) => v.is_default);
-      if (defaultVariant && ((product as any).metal_type !== undefined || (product as any).carat !== undefined)) {
+      if (defaultVariant) {
         await supabase
           .from('product_variants')
           .update({
+            name: product.name,
+            price: product.price,
+            original_price: product.original_price,
+            sku: (product as any).sku?.trim() || null,
+            stock: product.stock ?? 0,
+            is_active: product.is_active ?? true,
             metal_type: (product as any).metal_type ?? null,
-            carat: (product as any).carat ?? null
+            carat: (product as any).carat ?? null,
           })
           .eq('id', defaultVariant.id);
       }
@@ -1847,9 +1903,9 @@ const fetchOrderDetails = async (orderId: number) => {
 
         {/* Search and Actions */}
         <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between mb-6 gap-4">
-          <div className="flex flex-col sm:flex-row gap-4 flex-1">
+          <div className={`flex flex-col gap-4 flex-1 ${activeTab !== 'orders' ? 'sm:flex-row' : ''}`}>
             {activeTab !== 'dashboard' && activeTab !== 'couriers' && activeTab !== 'packages' && (
-              <div className="relative flex-1 max-w-md">
+              <div className={`relative ${activeTab === 'orders' ? 'w-full max-w-lg' : 'flex-1 max-w-md'}`}>
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
                 <input
                   type="text"
@@ -2014,6 +2070,16 @@ const fetchOrderDetails = async (orderId: number) => {
             )}
             {activeTab === 'orders' && (
               <button
+                onClick={() => fetchOrders()}
+                disabled={loading.orders}
+                className="flex items-center space-x-2 px-4 py-2 bg-gray-700 hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg transition-colors"
+              >
+                <RefreshCw className={`h-4 w-4 ${loading.orders ? 'animate-spin' : ''}`} />
+                <span>Actualizar</span>
+              </button>
+            )}
+            {activeTab === 'orders' && (
+              <button
                 onClick={handleOpenCourierModal}
                 disabled={processingShipping}
                 className="flex items-center space-x-2 px-4 py-2 bg-yellow-500 hover:bg-yellow-600 disabled:opacity-50 disabled:cursor-not-allowed text-black rounded-lg transition-colors"
@@ -2168,175 +2234,143 @@ const fetchOrderDetails = async (orderId: number) => {
 
 
         {activeTab === 'products' && (
-          <div className="bg-gray-800 rounded-lg overflow-hidden shadow-lg">
+          <div className="space-y-2">
             {loading.products ? (
-              <div className="flex justify-center items-center p-8">
+              <div className="flex justify-center items-center py-12">
                 <RefreshCw className="h-6 w-6 animate-spin text-yellow-400" />
               </div>
-            ) : (
-              <table className="w-full">
-                <thead className="bg-gray-700">
-                  <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Producto / Modelo / Talla</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Precio</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Stock</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Estado</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">Acciones</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-700">
-                  {(() => {
-                    const currentPagination = pagination.products;
-                    const startIndex = (currentPagination.page - 1) * currentPagination.limit;
-                    const endIndex = startIndex + currentPagination.limit;
-                    const paginatedProducts = filteredProducts.slice(startIndex, endIndex);
-                    
-                    return paginatedProducts.map((product) => {
-                      // Agrupar variantes por modelo
-                      const productVariants = variants[product.id] || [];
-                      const defaultVariant = productVariants.find(v => v.is_default === true);
-                      const variantsByModel = productVariants.reduce((acc, variant) => {
-                        const modelKey = variant.model || 'default';
-                        if (!acc[modelKey]) {
-                          acc[modelKey] = [];
-                        }
-                        acc[modelKey].push(variant);
-                        return acc;
-                      }, {} as Record<string, typeof productVariants>);
-                      
-                      // Ordenar modelos: primero el default, luego los demás
-                      const modelKeys = Object.keys(variantsByModel).sort((a, b) => {
-                        if (a === 'default' || defaultVariant?.model === a) return -1;
-                        if (b === 'default' || defaultVariant?.model === b) return 1;
-                        return a.localeCompare(b);
-                      });
-                      
-                      return (
-                        <React.Fragment key={product.id}>
-                          {/* Fila del producto */}
-                          <tr className="bg-gray-800/50">
-                            <td className="px-6 py-4 whitespace-nowrap" colSpan={5}>
-                              <div className="flex items-center space-x-4">
-                                {isVideoUrl(product.image) ? (
-                                  <video
-                                    src={buildMediaUrl(product.image)}
-                                    className="h-12 w-12 rounded-md object-cover"
-                                    muted
-                                    playsInline
-                                  />
-                                ) : (
-                                  <img
-                                    src={buildMediaUrl(product.image)}
-                                    alt={product.name}
-                                    className="h-12 w-12 rounded-md object-cover"
-                                  />
-                                )}
-                                <div className="flex-1">
-                                  <div className="font-bold text-lg">{product.name}</div>
-                                  <div className="text-gray-400 text-sm">{categories.find(c => c.id === product.category_id)?.name || 'Sin categoría'}</div>
-                                </div>
-                                <div className="flex items-center space-x-2">
-                                  <button
-                                    onClick={() => {
-                                      const defaultV = variants[product.id]?.find((v: ProductVariant) => v.is_default);
-                                      setEditingProduct({
-                                        ...product,
-                                        sku: (defaultV as any)?.sku ?? (product as any).sku ?? '',
-                                        ...(defaultV && {
-                                          metal_type: defaultV.metal_type ?? undefined,
-                                          carat: defaultV.carat ?? undefined
-                                        })
-                                      } as Product);
-                                    }}
-                                    className="text-blue-400 hover:text-blue-300"
-                                    title="Editar producto"
-                                  >
-                                    <Edit className="h-4 w-4" />
-                                  </button>
-                                  <button
-                                    onClick={() => {
-                                      fetchProductDetails(product.id);
-                                      setShowProductDetails({ show: true, productId: product.id });
-                                    }}
-                                    className="text-green-400 hover:text-green-300"
-                                    title="Ver detalles"
-                                  >
-                                    <Eye className="h-4 w-4" />
-                                  </button>
-                                  {isAdmin() && (
-                                    <button
-                                      onClick={() => handleDeleteProduct(product.id)}
-                                      className="text-red-400 hover:text-red-300"
-                                      title="Eliminar producto"
-                                    >
-                                      <Trash2 className="h-4 w-4" />
-                                    </button>
-                                  )}
-                                </div>
-                              </div>
-                            </td>
-                          </tr>
-                          
-                          {/* Modelos y sus tallas */}
-                          {modelKeys.map((modelKey) => {
-                            const modelVariants = variantsByModel[modelKey];
-                            const isDefaultModel = modelKey === 'default' || defaultVariant?.model === modelKey;
-                            const firstVariant = modelVariants[0];
-                            const modelImage = isDefaultModel 
-                              ? product.image 
-                              : (firstVariant?.image && !firstVariant?.use_product_images ? firstVariant.image : product.image);
-                            
-                            return (
-                              <React.Fragment key={modelKey}>
-                                {/* Fila del modelo */}
-                                <tr className="bg-gray-750/50">
-                                  <td className="px-6 py-3 whitespace-nowrap pl-12">
-                                    <div className="flex items-center space-x-3">
-                                      {modelImage && (
-                                        isVideoUrl(modelImage) ? (
-                                          <video
-                                            src={buildMediaUrl(modelImage)}
-                                            className="h-10 w-10 rounded-md object-cover"
-                                            muted
-                                            playsInline
-                                          />
+            ) : (() => {
+              const currentPagination = pagination.products;
+              const startIndex = (currentPagination.page - 1) * currentPagination.limit;
+              const endIndex = startIndex + currentPagination.limit;
+              const paginatedProducts = filteredProducts.slice(startIndex, endIndex);
+              return (
+                <>
+                  {paginatedProducts.map((product) => {
+                    const productVariants = variants[product.id] || [];
+                    const defaultVariant = productVariants.find(v => v.is_default === true);
+                    const variantsByModel = productVariants.reduce((acc, variant) => {
+                      const modelKey = variant.model || 'default';
+                      if (!acc[modelKey]) acc[modelKey] = [];
+                      acc[modelKey].push(variant);
+                      return acc;
+                    }, {} as Record<string, typeof productVariants>);
+                    const modelKeys = Object.keys(variantsByModel).sort((a, b) => {
+                      if (a === 'default' || defaultVariant?.model === a) return -1;
+                      if (b === 'default' || defaultVariant?.model === b) return 1;
+                      return a.localeCompare(b);
+                    });
+                    const totalStock = productVariants.reduce((sum, v) => sum + (v.stock || 0), 0);
+                    const isExpanded = expandedProducts.has(product.id);
+
+                    return (
+                      <div key={product.id} className="bg-gray-800 rounded-xl border border-gray-700/60 overflow-hidden">
+                        {/* Cabecera del producto */}
+                        <div className="flex items-center gap-3 p-3 sm:p-4">
+                          <div className="flex-shrink-0 w-14 h-14 rounded-lg overflow-hidden border border-gray-700 bg-gray-900">
+                            {isVideoUrl(product.image) ? (
+                              <video src={buildMediaUrl(product.image)} className="w-full h-full object-cover" muted playsInline />
+                            ) : (
+                              <img src={buildMediaUrl(product.image)} alt={product.name} className="w-full h-full object-cover" onError={e => { (e.target as HTMLImageElement).src = '/default-product-image.png'; }} />
+                            )}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="font-semibold text-white text-sm">{product.name}</span>
+                              {product.is_new && <span className="text-[9px] bg-green-600 text-white px-1.5 py-0.5 rounded-full font-bold">NUEVO</span>}
+                              {product.is_featured && <span className="text-[9px] bg-gray-300 text-black px-1.5 py-0.5 rounded-full font-bold">DEST.</span>}
+                              <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${product.is_active !== false ? 'bg-green-500/15 text-green-400' : 'bg-red-500/15 text-red-400'}`}>
+                                {product.is_active !== false ? 'Activo' : 'Inactivo'}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                              <span className="text-xs text-gray-400">{categories.find(c => c.id === product.category_id)?.name || 'Sin categoría'}</span>
+                              <span className="text-gray-600 text-xs">·</span>
+                              <span className="text-xs font-bold text-yellow-400">${product.price.toFixed(2)}</span>
+                              <span className="text-gray-600 text-xs">·</span>
+                              <span className="text-xs text-gray-500">Stock total: <span className="text-gray-300 font-medium">{totalStock}</span></span>
+                              <span className="text-gray-600 text-xs">·</span>
+                              <span className="text-xs text-gray-500">{modelKeys.length} modelo{modelKeys.length !== 1 ? 's' : ''}</span>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-1 flex-shrink-0">
+                            <button
+                              onClick={() => {
+                                const defaultV = variants[product.id]?.find((v: ProductVariant) => v.is_default);
+                                setEditingProduct({
+                                  ...product,
+                                  sku: (defaultV as any)?.sku ?? (product as any).sku ?? '',
+                                  ...(defaultV && { metal_type: defaultV.metal_type ?? undefined, carat: defaultV.carat ?? undefined })
+                                } as Product);
+                              }}
+                              className="p-2 rounded-lg text-blue-400 hover:text-blue-300 hover:bg-blue-400/10 transition-all cursor-pointer"
+                              title="Editar producto"
+                            >
+                              <Edit className="h-4 w-4" />
+                            </button>
+                            <button
+                              onClick={() => { fetchProductDetails(product.id); setShowProductDetails({ show: true, productId: product.id }); }}
+                              className="p-2 rounded-lg text-green-400 hover:text-green-300 hover:bg-green-400/10 transition-all cursor-pointer"
+                              title="Ver detalles"
+                            >
+                              <Eye className="h-4 w-4" />
+                            </button>
+                            {isAdmin() && (
+                              <button
+                                onClick={() => handleDeleteProduct(product.id)}
+                                className="p-2 rounded-lg text-red-400 hover:text-red-300 hover:bg-red-400/10 transition-all cursor-pointer"
+                                title="Eliminar producto"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            )}
+                            <button
+                              onClick={() => setExpandedProducts(prev => { const next = new Set(prev); next.has(product.id) ? next.delete(product.id) : next.add(product.id); return next; })}
+                              className="p-2 rounded-lg text-gray-400 hover:text-gray-200 hover:bg-gray-700 transition-all cursor-pointer ml-1"
+                              title={isExpanded ? 'Colapsar' : 'Ver modelos y tallas'}
+                            >
+                              <ChevronDown className={`h-4 w-4 transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`} />
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Sección expandible: modelos y tallas */}
+                        {isExpanded && (
+                          <div className="border-t border-gray-700/50 bg-gray-900/20">
+                            {modelKeys.length === 0 ? (
+                              <div className="px-4 py-3 text-xs text-gray-500 italic">Sin variantes registradas</div>
+                            ) : modelKeys.map((modelKey) => {
+                              const modelVariants = variantsByModel[modelKey];
+                              const isDefaultModel = modelKey === 'default' || defaultVariant?.model === modelKey;
+                              const firstVariant = modelVariants[0];
+                              const modelImage = isDefaultModel
+                                ? product.image
+                                : (firstVariant?.image && !firstVariant?.use_product_images ? firstVariant.image : product.image);
+
+                              return (
+                                <div key={modelKey} className="border-b border-gray-700/30 last:border-0">
+                                  {/* Cabecera del modelo */}
+                                  <div className="flex items-center gap-3 px-4 py-2.5 bg-gray-800/40">
+                                    {modelImage && (
+                                      <div className="w-8 h-8 rounded-md overflow-hidden border border-gray-700 flex-shrink-0 bg-gray-900">
+                                        {isVideoUrl(modelImage) ? (
+                                          <video src={buildMediaUrl(modelImage)} className="w-full h-full object-cover" muted playsInline />
                                         ) : (
-                                          <img
-                                            src={buildMediaUrl(modelImage)}
-                                            alt={firstVariant?.name || product.name}
-                                            className="h-10 w-10 rounded-md object-cover"
-                                          />
-                                        )
-                                      )}
-                                      <div>
-                                        <div className="font-medium text-gray-200">
-                                          {isDefaultModel ? 'Default o Modelo Principal' : (firstVariant?.model || 'Sin modelo')}
-                                        </div>
-                                        <div className="text-gray-400 text-xs">
-                                          SKU: {(firstVariant as any)?.sku || '—'}
-                                        </div>
+                                          <img src={buildMediaUrl(modelImage)} alt={firstVariant?.name || product.name} className="w-full h-full object-cover" onError={e => { (e.target as HTMLImageElement).src = '/default-product-image.png'; }} />
+                                        )}
+                                      </div>
+                                    )}
+                                    <div className="flex-1 min-w-0">
+                                      <div className="text-sm font-semibold text-gray-200">
+                                        {isDefaultModel ? 'Modelo Principal' : (firstVariant?.model || 'Sin modelo')}
+                                      </div>
+                                      <div className="text-[10px] text-gray-500">
+                                        SKU: {(firstVariant as any)?.sku || '—'} · {modelVariants.length} talla{modelVariants.length !== 1 ? 's' : ''}
                                       </div>
                                     </div>
-                                  </td>
-                                  <td className="px-6 py-3 whitespace-nowrap">
-                                    <div className="text-sm">${firstVariant?.price?.toFixed(2) || product.price.toFixed(2)}</div>
-                                    <div className="text-gray-400 text-xs">SKU: {(firstVariant as any)?.sku || '—'}</div>
-                                  </td>
-                                  <td className="px-6 py-3 whitespace-nowrap">
-                                    <div className="text-gray-400 text-xs">
-                                      {modelVariants.length} talla{modelVariants.length !== 1 ? 's' : ''}
-                                    </div>
-                                  </td>
-                                  <td className="px-6 py-3 whitespace-nowrap">
-                                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${firstVariant?.is_active !== false ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
-                                      {firstVariant?.is_active !== false ? 'Activo' : 'Inactivo'}
-                                    </span>
-                                  </td>
-                                  <td className="px-6 py-3 whitespace-nowrap">
-                                    <div className="flex items-center space-x-2">
+                                    <div className="flex items-center gap-1">
                                       <button
                                         onClick={() => {
-                                          // Editar el modelo (primera variante del modelo)
                                           const variantWithImages = variants[product.id]?.find(v => v.id === firstVariant.id);
                                           setEditingVariant({
                                             id: Number(firstVariant.id),
@@ -2358,7 +2392,7 @@ const fetchOrderDetails = async (orderId: number) => {
                                             image_reference_variant_id: firstVariant.image_reference_variant_id || null
                                           });
                                         }}
-                                        className="text-blue-400 hover:text-blue-300 text-xs"
+                                        className="p-1.5 rounded text-blue-400 hover:text-blue-300 hover:bg-blue-400/10 transition-all cursor-pointer"
                                         title="Editar modelo"
                                       >
                                         <Edit className="h-3 w-3" />
@@ -2366,202 +2400,211 @@ const fetchOrderDetails = async (orderId: number) => {
                                       <button
                                         onClick={() => {
                                           setShowAddVariant({ show: true, productId: Number(product.id) });
-                                          setNewVariant({ 
-                                            sku: '',
-                                            name: '', 
-                                            price: firstVariant?.price || product.price, 
-                                            original_price: firstVariant?.original_price || product.original_price, 
-                                            model: isDefaultModel ? '' : (firstVariant?.model || ''), 
-                                            size: '', 
-                                            stock: 0, 
-                                            metal_type: null,
-                                            carat: undefined,
-                                            imageFile: null, 
-                                            is_active: true, 
-                                            is_default: false,
-                                            use_product_images: true,
-                                            use_model_images: false,
-                                            image_reference_variant_id: null
+                                          setNewVariant({
+                                            sku: '', name: '',
+                                            price: firstVariant?.price || product.price,
+                                            original_price: firstVariant?.original_price || product.original_price,
+                                            model: isDefaultModel ? '' : (firstVariant?.model || ''),
+                                            size: '', stock: 0, metal_type: null, carat: undefined, imageFile: null,
+                                            is_active: true, is_default: false,
+                                            use_product_images: true, use_model_images: false, image_reference_variant_id: null
                                           });
                                           setNewVariantGalleryFiles(null);
                                         }}
-                                        className="text-yellow-400 hover:text-yellow-300 text-xs"
+                                        className="p-1.5 rounded text-yellow-400 hover:text-yellow-300 hover:bg-yellow-400/10 transition-all cursor-pointer"
                                         title="Agregar talla a este modelo"
                                       >
                                         <Plus className="h-3 w-3" />
                                       </button>
                                     </div>
-                                  </td>
-                                </tr>
-                                
-                                {/* Filas de tallas */}
-                                {modelVariants.map((variant) => (
-                                  <tr key={variant.id} className="bg-gray-700/30">
-                                    <td className="px-6 py-2 whitespace-nowrap pl-20">
-                                      <div className="flex items-center space-x-2">
-                                        <span className="text-gray-300">#</span>
-                                        <span className="font-medium text-gray-200">{variant.size || 'Sin talla'}</span>
-                                      </div>
-                                    </td>
-                                    <td className="px-6 py-2 whitespace-nowrap">
-                                      <div className="text-sm">${variant.price.toFixed(2)}</div>
-                                      <div className="text-gray-400 text-xs">SKU: {(variant as any)?.sku || '—'}</div>
-                                      {variant.original_price && variant.original_price > variant.price && (
-                                        <div className="text-xs text-gray-400 line-through">
-                                          ${variant.original_price.toFixed(2)}
+                                  </div>
+
+                                  {/* Filas de tallas */}
+                                  <div className="px-3 pb-3 pt-1.5 space-y-1.5">
+                                    {modelVariants.map((variant) => (
+                                      <div key={variant.id} className="flex items-center gap-2.5 py-2 px-3 rounded-xl bg-gray-800/30 hover:bg-gray-800/60 border border-transparent hover:border-gray-700/40 transition-all group">
+
+                                        {/* Badge de talla */}
+                                        <span className="flex-shrink-0 inline-flex items-center px-2 py-0.5 rounded-md bg-yellow-500/10 text-yellow-400 border border-yellow-500/20 text-[11px] font-bold tracking-wide min-w-[3rem] justify-center">
+                                          {variant.size || 'Única'}
+                                        </span>
+
+                                        {/* Metal y quilates */}
+                                        {(variant.metal_type || variant.carat) && (
+                                          <div className="flex items-center gap-1 flex-shrink-0">
+                                            {variant.metal_type && (
+                                              <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-700/60 text-gray-400 font-medium border border-gray-600/30">
+                                                {variant.metal_type}
+                                              </span>
+                                            )}
+                                            {variant.carat && (
+                                              <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-700/60 text-gray-400 font-medium border border-gray-600/30">
+                                                {variant.carat}k
+                                              </span>
+                                            )}
+                                          </div>
+                                        )}
+
+                                        {/* Divisor */}
+                                        <div className="w-px h-3.5 bg-gray-700/70 flex-shrink-0" />
+
+                                        {/* Precio */}
+                                        <div className="flex items-baseline gap-1.5 flex-shrink-0">
+                                          <span className="text-sm font-bold text-white">${variant.price.toFixed(2)}</span>
+                                          {variant.original_price && variant.original_price > variant.price && (
+                                            <span className="text-[10px] text-gray-500 line-through">${variant.original_price.toFixed(2)}</span>
+                                          )}
                                         </div>
-                                      )}
-                                    </td>
-                                    <td className="px-6 py-2 whitespace-nowrap">
-                                      {editingStock?.variantId === variant.id ? (
-                                        <div className="flex items-center space-x-2">
-                                          <input
-                                            type="number"
-                                            value={editingStock.value}
-                                            onChange={(e) =>
-                                              setEditingStock({
-                                                ...editingStock,
-                                                value: parseInt(e.target.value) || 0
-                                              })
-                                            }
-                                            className="w-20 bg-gray-700 border border-gray-600 rounded px-2 py-1 text-sm"
-                                          />
+
+                                        {/* Divisor */}
+                                        <div className="w-px h-3.5 bg-gray-700/70 flex-shrink-0" />
+
+                                        {/* Stock */}
+                                        {editingStock?.variantId === variant.id ? (
+                                          <div className="flex items-center gap-1.5 flex-shrink-0">
+                                            <input
+                                              type="number"
+                                              value={editingStock.value}
+                                              onChange={(e) => setEditingStock({ ...editingStock, value: parseInt(e.target.value) || 0 })}
+                                              className="w-16 bg-gray-700 border border-yellow-500/40 rounded-lg px-2 py-0.5 text-xs text-white focus:outline-none focus:border-yellow-400"
+                                            />
+                                            <button onClick={handleStockUpdate} className="p-0.5 text-green-400 hover:text-green-300 cursor-pointer transition-colors">
+                                              <Save className="h-3.5 w-3.5" />
+                                            </button>
+                                            <button onClick={() => setEditingStock(null)} className="p-0.5 text-red-400 hover:text-red-300 cursor-pointer transition-colors">
+                                              <X className="h-3.5 w-3.5" />
+                                            </button>
+                                          </div>
+                                        ) : (
                                           <button
-                                            onClick={handleStockUpdate}
-                                            className="text-green-400 hover:text-green-300"
+                                            onClick={() => setEditingStock({ productId: product.id, variantId: variant.id, value: variant.stock || 0 })}
+                                            className="flex items-center gap-1.5 flex-shrink-0 cursor-pointer group/stock"
+                                            title="Editar stock"
                                           >
-                                            <Save className="h-3 w-3" />
+                                            <div className={`flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium border transition-all ${
+                                              (variant.stock || 0) === 0
+                                                ? 'bg-red-500/10 text-red-400 border-red-500/20 group-hover/stock:border-red-400/40'
+                                                : (variant.stock || 0) <= 3
+                                                  ? 'bg-orange-500/10 text-orange-400 border-orange-500/20 group-hover/stock:border-orange-400/40'
+                                                  : 'bg-gray-700/40 text-gray-400 border-gray-600/30 group-hover/stock:border-gray-500/60 group-hover/stock:text-gray-300'
+                                            }`}>
+                                              <Package className="h-2.5 w-2.5 flex-shrink-0" />
+                                              <span>{variant.stock || 0}</span>
+                                            </div>
+                                            <Edit className="h-2.5 w-2.5 text-gray-600 opacity-0 group-hover:opacity-100 transition-opacity" />
                                           </button>
+                                        )}
+
+                                        <span className="flex-1" />
+
+                                        {/* Estado */}
+                                        <span className={`flex-shrink-0 text-[9px] font-bold px-2 py-0.5 rounded-full border ${variant.is_active !== false ? 'bg-green-500/10 text-green-400 border-green-500/20' : 'bg-red-500/10 text-red-400 border-red-500/20'}`}>
+                                          {variant.is_active !== false ? 'Activo' : 'Inactivo'}
+                                        </span>
+
+                                        {/* Acciones */}
+                                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
                                           <button
-                                            onClick={() => setEditingStock(null)}
-                                            className="text-red-400 hover:text-red-300"
-                                          >
-                                            <X className="h-3 w-3" />
-                                          </button>
-                                        </div>
-                                      ) : (
-                                        <div className="flex items-center space-x-2">
-                                          <span className="text-sm">{variant.stock || 0}</span>
-                                          <button
-                                            onClick={() =>
-                                              setEditingStock({
-                                                productId: product.id,
-                                                variantId: variant.id,
-                                                value: variant.stock || 0
-                                              })
-                                            }
-                                            className="text-yellow-400 hover:text-yellow-300"
-                                            title="Editar stock de talla"
+                                            onClick={() => {
+                                              const variantWithImages = variants[product.id]?.find(v => v.id === variant.id);
+                                              setEditingVariant({
+                                                id: Number(variant.id),
+                                                product_id: Number(variant.product_id),
+                                                sku: (variant as any).sku ?? '',
+                                                name: variant.name,
+                                                price: Number(variant.price),
+                                                original_price: variant.original_price ? Number(variant.original_price) : undefined,
+                                                model: variant.model || '',
+                                                size: variant.size || '',
+                                                stock: Number(variant.stock || 0),
+                                                metal_type: variant.metal_type ?? null,
+                                                carat: variant.carat ?? null,
+                                                image: variant.image || null,
+                                                variant_images: (variantWithImages as any)?.variant_images || [],
+                                                is_default: variant.is_default || false,
+                                                use_product_images: variant.use_product_images ?? true,
+                                                use_model_images: variant.use_model_images ?? false,
+                                                image_reference_variant_id: variant.image_reference_variant_id || null
+                                              });
+                                            }}
+                                            className="p-1 rounded-lg text-blue-400 hover:text-blue-300 hover:bg-blue-400/10 transition-all cursor-pointer"
+                                            title="Editar talla"
                                           >
                                             <Edit className="h-3 w-3" />
                                           </button>
+                                          {!variant.is_default && (
+                                            <button
+                                              onClick={() => handleDeleteVariant(Number(variant.id))}
+                                              className="p-1 rounded-lg text-red-400 hover:text-red-300 hover:bg-red-400/10 transition-all cursor-pointer"
+                                              title="Eliminar talla"
+                                            >
+                                              <Trash2 className="h-3 w-3" />
+                                            </button>
+                                          )}
                                         </div>
-                                      )}
-                                    </td>
-                                    <td className="px-6 py-2 whitespace-nowrap">
-                                      <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${variant.is_active !== false ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
-                                        {variant.is_active !== false ? 'Activo' : 'Inactivo'}
-                                      </span>
-                                    </td>
-                                    <td className="px-6 py-2 whitespace-nowrap">
-                                      <div className="flex items-center space-x-2">
-                                        <button
-                                          onClick={() => {
-                                            const variantWithImages = variants[product.id]?.find(v => v.id === variant.id);
-                                            setEditingVariant({
-                                              id: Number(variant.id),
-                                              product_id: Number(variant.product_id),
-                                              sku: (variant as any).sku ?? '',
-                                              name: variant.name,
-                                              price: Number(variant.price),
-                                              original_price: variant.original_price ? Number(variant.original_price) : undefined,
-                                              model: variant.model || '',
-                                              size: variant.size || '',
-                                              stock: Number(variant.stock || 0),
-                                              metal_type: variant.metal_type ?? null,
-                                              carat: variant.carat ?? null,
-                                              image: variant.image || null,
-                                              variant_images: (variantWithImages as any)?.variant_images || [],
-                                              is_default: variant.is_default || false,
-                                              use_product_images: variant.use_product_images ?? true,
-                                              use_model_images: variant.use_model_images ?? false,
-                                              image_reference_variant_id: variant.image_reference_variant_id || null
-                                            });
-                                          }}
-                                          className="text-blue-400 hover:text-blue-300"
-                                          title="Editar talla"
-                                        >
-                                          <Edit className="h-3 w-3" />
-                                        </button>
-                                        {!variant.is_default && (
-                                        <button
-                                          onClick={() => handleDeleteVariant(Number(variant.id))}
-                                          className="text-red-400 hover:text-red-300"
-                                          title="Eliminar talla"
-                                        >
-                                          <Trash2 className="h-3 w-3" />
-                                        </button>
-                                        )}
                                       </div>
-                                    </td>
-                                  </tr>
-                                ))}
-                              </React.Fragment>
-                            );
-                          })}
-                        </React.Fragment>
-                      );
-                    });
+                                    ))}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                            {/* Botón agregar nuevo modelo */}
+                            <div className="px-4 py-2.5 border-t border-gray-700/30">
+                              <button
+                                onClick={() => {
+                                  setShowAddVariant({ show: true, productId: Number(product.id) });
+                                  setNewVariant({
+                                    sku: '', name: '', price: product.price,
+                                    original_price: product.original_price,
+                                    model: '', size: '', stock: 0,
+                                    metal_type: null, carat: undefined, imageFile: null,
+                                    is_active: true, is_default: false,
+                                    use_product_images: true, use_model_images: false, image_reference_variant_id: null
+                                  });
+                                  setNewVariantGalleryFiles(null);
+                                }}
+                                className="flex items-center gap-1.5 text-xs text-yellow-400 hover:text-yellow-300 transition-colors cursor-pointer"
+                              >
+                                <Plus className="h-3.5 w-3.5" />
+                                Agregar nuevo modelo/variante
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+
+                  {/* Paginación */}
+                  {(() => {
+                    const currentPagination = pagination.products;
+                    const totalRecords = filteredProducts.length;
+                    const totalPages = Math.max(1, Math.ceil(totalRecords / currentPagination.limit));
+                    const startIndex = (currentPagination.page - 1) * currentPagination.limit;
+                    const endIndex = startIndex + currentPagination.limit;
+                    if (totalPages <= 1) return null;
+                    return (
+                      <div className="flex items-center justify-between px-4 py-3 bg-gray-800 rounded-xl border border-gray-700/50">
+                        <div className="text-sm text-gray-400">
+                          Mostrando {startIndex + 1}–{Math.min(endIndex, totalRecords)} de {totalRecords}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => { setPagination(prev => ({ ...prev, products: { ...prev.products, page: prev.products.page - 1 } })); window.scrollTo(0, 0); }}
+                            disabled={currentPagination.page <= 1}
+                            className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg text-sm transition-colors cursor-pointer"
+                          >Anterior</button>
+                          <span className="text-sm text-gray-300">{currentPagination.page} / {totalPages}</span>
+                          <button
+                            onClick={() => { setPagination(prev => ({ ...prev, products: { ...prev.products, page: prev.products.page + 1 } })); window.scrollTo(0, 0); }}
+                            disabled={currentPagination.page >= totalPages}
+                            className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg text-sm transition-colors cursor-pointer"
+                          >Siguiente</button>
+                        </div>
+                      </div>
+                    );
                   })()}
-                </tbody>
-              </table>
-            )}
-            {(() => {
-              const currentPagination = pagination.products;
-              const totalRecords = filteredProducts.length;
-              const totalPages = Math.max(1, Math.ceil(totalRecords / currentPagination.limit));
-              const startIndex = (currentPagination.page - 1) * currentPagination.limit;
-              const endIndex = startIndex + currentPagination.limit;
-
-              if (totalPages <= 1) return null;
-
-              return (
-                <div className="flex items-center justify-between px-6 py-3 bg-gray-700">
-                  <div className="text-sm text-gray-400">
-                    Mostrando {startIndex + 1} - {Math.min(endIndex, totalRecords)} de {totalRecords}
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <button
-                      onClick={() => {
-                        setPagination(prev => ({
-                          ...prev,
-                          products: { ...prev.products, page: prev.products.page - 1 }
-                        }));
-                        window.scrollTo(0, 0);
-                      }}
-                      disabled={currentPagination.page <= 1}
-                      className="px-3 py-1 bg-gray-600 hover:bg-gray-500 disabled:opacity-50 disabled:cursor-not-allowed rounded text-sm"
-                    >
-                      Anterior
-                    </button>
-                    <span className="text-sm text-gray-300">
-                      Página {currentPagination.page} de {totalPages}
-                    </span>
-                    <button
-                      onClick={() => {
-                        setPagination(prev => ({
-                          ...prev,
-                          products: { ...prev.products, page: prev.products.page + 1 }
-                        }));
-                        window.scrollTo(0, 0);
-                      }}
-                      disabled={currentPagination.page >= totalPages}
-                      className="px-3 py-1 bg-gray-600 hover:bg-gray-500 disabled:opacity-50 disabled:cursor-not-allowed rounded text-sm"
-                    >
-                      Siguiente
-                    </button>
-                  </div>
-                </div>
+                </>
               );
             })()}
           </div>
@@ -3124,141 +3167,116 @@ const fetchOrderDetails = async (orderId: number) => {
 
       {/* Modal para agregar producto */}
       {showAddProduct && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-gray-800 rounded-lg p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-            <div className="flex justify-between items-center mb-3 sm:mb-4">
-              <h3 className="text-base sm:text-lg font-bold">Agregar Nuevo Producto</h3>
-              <label className="flex items-center cursor-pointer">
-                <div className="relative">
-                  <input
-                    type="checkbox"
-                    checked={newProduct.is_active ?? false}
-                    onChange={(e) => setNewProduct({ ...newProduct, is_active: e.target.checked })}
-                    className="sr-only"
-                  />
-                  <div className={`block w-14 h-8 rounded-full ${
-                    newProduct.is_active ? 'bg-green-500' : 'bg-gray-300'
-                  }`}></div>
-                  <div className={`absolute left-1 top-1 bg-white w-6 h-6 rounded-full transition-transform duration-200 ${
-                    newProduct.is_active ? 'transform translate-x-6' : ''
-                  }`}></div>
-                </div>
-                <span className="ml-3 text-gray-300 font-medium">
-                  {newProduct.is_active ? 'Activo' : 'Inactivo'}
-                </span>
-              </label>
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-gray-900 rounded-2xl w-full max-w-2xl max-h-[92vh] flex flex-col border border-gray-700/60 shadow-2xl">
+            {/* Header */}
+            <div className="flex-shrink-0 bg-gray-900/95 backdrop-blur-sm px-6 py-4 border-b border-gray-700/50 flex justify-between items-center rounded-t-2xl">
+              <div>
+                <h3 className="text-lg font-bold text-white">Agregar Producto</h3>
+                <p className="text-xs text-gray-500 mt-0.5">Los campos marcados crean la variante principal automáticamente</p>
+              </div>
+              <div className="flex items-center gap-3">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <div className="relative">
+                    <input type="checkbox" checked={newProduct.is_active ?? false} onChange={(e) => setNewProduct({ ...newProduct, is_active: e.target.checked })} className="sr-only" />
+                    <div className={`block w-12 h-6 rounded-full transition-colors ${newProduct.is_active ? 'bg-green-500' : 'bg-gray-600'}`}></div>
+                    <div className={`absolute left-0.5 top-0.5 bg-white w-5 h-5 rounded-full shadow transition-transform duration-200 ${newProduct.is_active ? 'translate-x-6' : ''}`}></div>
+                  </div>
+                  <span className={`text-sm font-medium ${newProduct.is_active ? 'text-green-400' : 'text-gray-500'}`}>{newProduct.is_active ? 'Activo' : 'Inactivo'}</span>
+                </label>
+                <button onClick={() => setShowAddProduct(false)} className="p-1.5 rounded-lg text-gray-500 hover:text-white hover:bg-gray-700 transition-all cursor-pointer">
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
+
+            <div className="flex-1 overflow-y-auto p-6 space-y-6">
+              {/* Sección: Identificación */}
               <div>
-                <label className="block text-gray-300 mb-1 text-sm">Peso (gramos)</label>
-                <input
-                  type="number"
-                  value={newProduct.weight_grams || 100}
-                  onChange={(e) => setNewProduct({ ...newProduct, weight_grams: parseFloat(e.target.value) || 100 })}
-                  className="w-full bg-gray-700 border border-gray-600 rounded px-2 sm:px-3 py-1.5 sm:py-2 text-sm"
-                  placeholder="100"
-                  min="0"
-                  step="0.1"
-                />
-              </div>
-              <div>
-                <label className="block text-gray-300 mb-1 text-sm">SKU (modelo principal)</label>
-                <input
-                  type="text"
-                  value={newProduct.sku || ''}
-                  onChange={(e) => setNewProduct({ ...newProduct, sku: e.target.value })}
-                  className="w-full bg-gray-700 border border-gray-600 rounded px-2 sm:px-3 py-1.5 sm:py-2 text-sm"
-                  placeholder="Ej: PROD-001"
-                />
-              </div>
-              <div>
-                <label className="block text-gray-300 mb-1 text-sm">Nombre</label>
-                <input
-                  type="text"
-                  value={newProduct.name}
-                  onChange={(e) => setNewProduct({ ...newProduct, name: e.target.value })}
-                  className="w-full bg-gray-700 border border-gray-600 rounded px-2 sm:px-3 py-1.5 sm:py-2 text-sm"
-                  placeholder="Nombre del producto"
-                />
-              </div>
-              <div>
-                <label className="block text-gray-300 mb-1">Precio</label>
-                <input
-                  type="number"
-                  value={newProduct.price}
-                  onChange={(e) => setNewProduct({ ...newProduct, price: parseFloat(e.target.value) || 0 })}
-                  className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
-                  placeholder="0.00"
-                />
-              </div>
-              <div>
-                <label className="block text-gray-300 mb-1">Precio Original</label>
-                <input
-                  type="number"
-                  value={newProduct.original_price || ''}
-                  onChange={(e) => setNewProduct({ ...newProduct, original_price: e.target.value ? parseFloat(e.target.value) : undefined })}
-                  className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
-                  placeholder="0.00"
-                />
-              </div>
-              <div>
-                <label className="block text-gray-300 mb-1">Categoría</label>
-                <select
-                  value={newProduct.category_id}
-                  onChange={(e) => setNewProduct({ ...newProduct, category_id: parseInt(e.target.value) || 1 })}
-                  className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
-                >
-                  {categories.map(category => (
-                    <option key={category.id} value={category.id}>{category.name}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-gray-300 mb-1">Material</label>
-                <input
-                  type="text"
-                  value={newProduct.material || ''}
-                  onChange={(e) => setNewProduct({ ...newProduct, material: e.target.value })}
-                  className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
-                  placeholder="Oro, plata, etc."
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-gray-300 mb-1">Metal / tipo</label>
-                  <select
-                    value={newProduct.metal_type ?? ''}
-                    onChange={(e) => setNewProduct({ ...newProduct, metal_type: e.target.value ? Number(e.target.value) : null })}
-                    className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
-                  >
-                    <option value="">Ninguno</option>
-                    {(metalTypesList.length ? metalTypesList : metalTypes || []).map((mt: { id: number; name: string }) => (
-                      <option key={mt.id} value={mt.id}>{mt.name}</option>
-                    ))}
-                  </select>
+                <div className="flex items-center gap-2 mb-3">
+                  <Tag className="h-3.5 w-3.5 text-yellow-400" />
+                  <span className="text-xs font-semibold text-yellow-400 uppercase tracking-widest">Identificación</span>
                 </div>
-                <div>
-                  <label className="block text-gray-300 mb-1">Quilates (k)</label>
-                  <input
-                    type="number"
-                    min={0}
-                    step={0.5}
-                    value={newProduct.carat ?? ''}
-                    onChange={(e) => setNewProduct({ ...newProduct, carat: e.target.value ? parseFloat(e.target.value) : undefined })}
-                    className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
-                    placeholder="Ej: 14"
-                  />
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-gray-400 mb-1 text-xs font-medium uppercase tracking-wide">SKU (modelo principal)</label>
+                    <input type="text" value={newProduct.sku || ''} onChange={(e) => setNewProduct({ ...newProduct, sku: e.target.value })}
+                      className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:border-yellow-400/50 focus:outline-none transition-colors"
+                      placeholder="Ej: PROD-001" />
+                  </div>
+                  <div className="sm:col-span-1">
+                    <label className="block text-gray-400 mb-1 text-xs font-medium uppercase tracking-wide">Nombre del producto</label>
+                    <input type="text" value={newProduct.name} onChange={(e) => setNewProduct({ ...newProduct, name: e.target.value })}
+                      className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:border-yellow-400/50 focus:outline-none transition-colors"
+                      placeholder="Nombre del producto" />
+                  </div>
+                  <div>
+                    <label className="block text-gray-400 mb-1 text-xs font-medium uppercase tracking-wide">Categoría</label>
+                    <select value={newProduct.category_id} onChange={(e) => setNewProduct({ ...newProduct, category_id: parseInt(e.target.value) || 1 })}
+                      className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:border-yellow-400/50 focus:outline-none transition-colors">
+                      {categories.map(category => (<option key={category.id} value={category.id}>{category.name}</option>))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-gray-400 mb-1 text-xs font-medium uppercase tracking-wide">Material</label>
+                    <input type="text" value={newProduct.material || ''} onChange={(e) => setNewProduct({ ...newProduct, material: e.target.value })}
+                      className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:border-yellow-400/50 focus:outline-none transition-colors"
+                      placeholder="Oro, plata, etc." />
+                  </div>
                 </div>
               </div>
+
+              {/* Sección: Precios y Stock */}
               <div>
-                <label className="block text-gray-300 mb-1">Stock</label>
-                <input
-                  type="number"
-                  value={newProduct.stock || 0}
-                  onChange={(e) => setNewProduct({ ...newProduct, stock: parseInt(e.target.value) || 0 })}
-                  className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
-                  placeholder="0"
-                />
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="text-yellow-400 text-xs">$</span>
+                  <span className="text-xs font-semibold text-yellow-400 uppercase tracking-widest">Precios y Stock</span>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-gray-400 mb-1 text-xs font-medium uppercase tracking-wide">Precio</label>
+                    <input type="number" value={newProduct.price} onChange={(e) => setNewProduct({ ...newProduct, price: parseFloat(e.target.value) || 0 })}
+                      className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:border-yellow-400/50 focus:outline-none transition-colors" placeholder="0.00" />
+                  </div>
+                  <div>
+                    <label className="block text-gray-400 mb-1 text-xs font-medium uppercase tracking-wide">Precio original</label>
+                    <input type="number" value={newProduct.original_price || ''} onChange={(e) => setNewProduct({ ...newProduct, original_price: e.target.value ? parseFloat(e.target.value) : undefined })}
+                      className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:border-yellow-400/50 focus:outline-none transition-colors" placeholder="0.00" />
+                  </div>
+                  <div>
+                    <label className="block text-gray-400 mb-1 text-xs font-medium uppercase tracking-wide">Stock inicial</label>
+                    <input type="number" value={newProduct.stock || 0} onChange={(e) => setNewProduct({ ...newProduct, stock: parseInt(e.target.value) || 0 })}
+                      className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:border-yellow-400/50 focus:outline-none transition-colors" placeholder="0" />
+                  </div>
+                </div>
+              </div>
+
+              {/* Sección: Clasificación */}
+              <div>
+                <div className="flex items-center gap-2 mb-3">
+                  <Package className="h-3.5 w-3.5 text-yellow-400" />
+                  <span className="text-xs font-semibold text-yellow-400 uppercase tracking-widest">Clasificación</span>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-gray-400 mb-1 text-xs font-medium uppercase tracking-wide">Metal / tipo</label>
+                    <select value={newProduct.metal_type ?? ''} onChange={(e) => setNewProduct({ ...newProduct, metal_type: e.target.value ? Number(e.target.value) : null })}
+                      className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:border-yellow-400/50 focus:outline-none transition-colors">
+                      <option value="">Ninguno</option>
+                      {(metalTypesList.length ? metalTypesList : metalTypes || []).map((mt: { id: number; name: string }) => (<option key={mt.id} value={mt.id}>{mt.name}</option>))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-gray-400 mb-1 text-xs font-medium uppercase tracking-wide">Quilates (k)</label>
+                    <input type="number" min={0} step={0.5} value={newProduct.carat ?? ''} onChange={(e) => setNewProduct({ ...newProduct, carat: e.target.value ? parseFloat(e.target.value) : undefined })}
+                      className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:border-yellow-400/50 focus:outline-none transition-colors" placeholder="Ej: 14" />
+                  </div>
+                  <div>
+                    <label className="block text-gray-400 mb-1 text-xs font-medium uppercase tracking-wide">Peso (gramos)</label>
+                    <input type="number" value={newProduct.weight_grams || 100} onChange={(e) => setNewProduct({ ...newProduct, weight_grams: parseFloat(e.target.value) || 100 })}
+                      className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:border-yellow-400/50 focus:outline-none transition-colors" placeholder="100" min="0" step="0.1" />
+                  </div>
+                </div>
               </div>
               {/* Configuración de imágenes: producto base o variante */}
               <div className="md:col-span-2">
@@ -3292,185 +3310,145 @@ const fetchOrderDetails = async (orderId: number) => {
                   </label>
                 </div>
               </div>
+              {/* Imágenes del nuevo producto */}
               <div>
-                <label className="block text-gray-300 mb-1">Imagen Principal</label>
-                <input
-                  type="file"
-                  accept="image/*"
-                  className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-sm"
-                  onChange={async (e) => {
-                    const file = e.target.files && e.target.files[0] ? e.target.files[0] : null;
-                    setProductMainImageFile(file);
-                    if (file) {
-                      const preview = await createImagePreview(file);
-                      setProductMainImagePreview(preview);
-                    } else {
-                      setProductMainImagePreview(null);
-                    }
-                  }}
-                />
-                {productMainImagePreview && (
-                  <div className="mt-2">
-                    <img src={productMainImagePreview} alt="Preview" className="h-32 w-full object-cover rounded-lg border border-gray-700" />
+                <div className="flex items-center gap-2 mb-3">
+                  <Image className="h-3.5 w-3.5 text-yellow-400" />
+                  <span className="text-xs font-semibold text-yellow-400 uppercase tracking-widest">Imágenes</span>
+                </div>
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-gray-400 mb-1.5 text-xs font-medium uppercase tracking-wide">Imagen Principal</label>
+                    {productMainImagePreview && (
+                      <img src={productMainImagePreview} alt="Preview" className="h-28 w-full object-cover rounded-xl border border-yellow-400/40 mb-2" />
+                    )}
+                    <input type="file" accept="image/*"
+                      className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-400 file:mr-3 file:py-1 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-medium file:bg-yellow-500/20 file:text-yellow-400 hover:file:bg-yellow-500/30 cursor-pointer"
+                      onChange={async (e) => {
+                        const file = e.target.files && e.target.files[0] ? e.target.files[0] : null;
+                        setProductMainImageFile(file);
+                        if (file) { const preview = await createImagePreview(file); setProductMainImagePreview(preview); } else { setProductMainImagePreview(null); }
+                      }} />
+                  </div>
+                  <div>
+                    <label className="block text-gray-400 mb-1.5 text-xs font-medium uppercase tracking-wide">Imágenes Complementarias</label>
+                    <input type="file" accept="image/*" multiple
+                      className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-400 file:mr-3 file:py-1 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-medium file:bg-yellow-500/20 file:text-yellow-400 hover:file:bg-yellow-500/30 cursor-pointer"
+                      onChange={async (e) => {
+                        const files = e.target.files;
+                        setProductGalleryFiles(files);
+                        if (files) { const previews = await Promise.all(Array.from(files).map(createImagePreview)); setProductGalleryPreviews(previews); } else { setProductGalleryPreviews([]); }
+                      }} />
+                    {productGalleryPreviews.length > 0 && (
+                      <div className="flex flex-wrap gap-2 mt-2">
+                        {productGalleryPreviews.map((preview, idx) => (
+                          <img key={idx} src={preview} alt={`Preview ${idx + 1}`} className="h-20 w-20 object-cover rounded-xl border border-yellow-400/30" />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
-                )}
-              </div>
-              <div className="md:col-span-2">
-                <label className="block text-gray-300 mb-1 text-sm">Imágenes Complementarias</label>
-                <input
-                  type="file"
-                  accept="image/*"
-                  multiple
-                  className="w-full bg-gray-700 border border-gray-600 rounded px-2 sm:px-3 py-1.5 sm:py-2 text-sm"
-                  onChange={async (e) => {
-                    const files = e.target.files;
-                    setProductGalleryFiles(files);
-                    if (files) {
-                      const previews = await Promise.all(Array.from(files).map(createImagePreview));
-                      setProductGalleryPreviews(previews);
-                    } else {
-                      setProductGalleryPreviews([]);
-                    }
-                  }}
-                />
-                {productGalleryPreviews.length > 0 && (
-                  <div className="flex flex-wrap gap-2 mt-2">
-                    {productGalleryPreviews.map((preview, idx) => (
-                      <img key={idx} src={preview} alt={`Preview ${idx + 1}`} className="h-20 w-20 object-cover rounded-lg border border-gray-700" />
+
+              {/* Estado y Características */}
+              <div>
+                <div className="flex items-center gap-2 mb-3">
+                  <AlertCircle className="h-3.5 w-3.5 text-yellow-400" />
+                  <span className="text-xs font-semibold text-yellow-400 uppercase tracking-widest">Estado y Características</span>
+                </div>
+                <div className="bg-gray-800/40 rounded-xl p-4 border border-gray-700/40 space-y-3">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-y-3 gap-x-4">
+                    {[
+                      { label: 'En Stock', checked: newProduct.in_stock || false, onChange: (v: boolean) => setNewProduct({ ...newProduct, in_stock: v }) },
+                      { label: 'Nuevo', checked: newProduct.is_new || false, onChange: (v: boolean) => setNewProduct({ ...newProduct, is_new: v }) },
+                      { label: 'Destacado', checked: newProduct.is_featured || false, onChange: (v: boolean) => setNewProduct({ ...newProduct, is_featured: v }) },
+                      { label: 'Garantía', checked: newProduct.has_warranty || false, onChange: (v: boolean) => setNewProduct({ ...newProduct, has_warranty: v }) },
+                    ].map(({ label, checked, onChange }) => (
+                      <label key={label} className="flex items-center gap-2 cursor-pointer group/ck">
+                        <div className={`w-4 h-4 rounded border flex items-center justify-center flex-shrink-0 transition-colors ${checked ? 'bg-yellow-500 border-yellow-500' : 'bg-gray-700 border-gray-600 group-hover/ck:border-gray-400'}`}>
+                          {checked && <svg className="w-2.5 h-2.5 text-black" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7"/></svg>}
+                        </div>
+                        <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} className="sr-only" />
+                        <span className="text-sm text-gray-300">{label}</span>
+                      </label>
                     ))}
                   </div>
-                )}
-              </div>
-              {/* Estado y Envío y valor: una fila cada uno con checkboxes */}
-              <div className="md:col-span-2">
-                <span className="text-gray-300 text-sm font-medium block mb-2">Estado</span>
-                <div className="flex flex-wrap gap-4 mb-4">
-                  <label className="flex items-center">
-                    <input
-                      type="checkbox"
-                      checked={newProduct.in_stock || false}
-                      onChange={(e) => setNewProduct({ ...newProduct, in_stock: e.target.checked })}
-                      className="mr-2"
-                    />
-                    En Stock
-                  </label>
-                  <label className="flex items-center">
-                    <input
-                      type="checkbox"
-                      checked={newProduct.is_new || false}
-                      onChange={(e) => setNewProduct({ ...newProduct, is_new: e.target.checked })}
-                      className="mr-2"
-                    />
-                    Nuevo
-                  </label>
-                  <label className="flex items-center">
-                    <input
-                      type="checkbox"
-                      checked={newProduct.is_featured || false}
-                      onChange={(e) => setNewProduct({ ...newProduct, is_featured: e.target.checked })}
-                      className="mr-2"
-                    />
-                    Destacado
-                  </label>
-                </div>
-                <span className="text-gray-300 text-sm font-medium block mb-2">Envío y valor</span>
-                <div className="flex flex-wrap gap-4">
-                  <label className="flex items-center opacity-60 cursor-not-allowed">
-                    <input
-                      type="checkbox"
-                      checked={newProduct.is_high_value || false}
-                      disabled
-                      className="mr-2"
-                    />
-                    Alto Valor (automático)
-                  </label>
-                  <label className="flex items-center opacity-60 cursor-not-allowed">
-                    <input
-                      type="checkbox"
-                      checked={newProduct.requires_special_shipping || false}
-                      disabled
-                      className="mr-2"
-                    />
-                    Envío Especial (automático)
-                  </label>
-                  <label className="flex items-center">
-                    <input
-                      type="checkbox"
-                      checked={newProduct.has_warranty || false}
-                      onChange={(e) => setNewProduct({ ...newProduct, has_warranty: e.target.checked })}
-                      className="mr-2"
-                    />
-                    Tiene Garantía
-                  </label>
-                </div>
-              </div>
-              {newProduct.has_warranty && (
-                <>
-                  <div>
-                    <label className="block text-gray-300 mb-1">Unidad de Garantía</label>
-                    <select
-                      value={newProduct.warranty_unit || ''}
-                      onChange={(e) => setNewProduct({
-                        ...newProduct,
-                        warranty_unit: e.target.value,
-                        warranty_period: e.target.value === 'lifetime' ? undefined : newProduct.warranty_period
-                      })}
-                      className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
-                    >
-                      <option value="">Seleccionar unidad</option>
-                      <option value="lifetime">De por vida</option>
-                      <option value="dias">Días</option>
-                      <option value="meses">Meses</option>
-                      <option value="años">Años</option>
-                    </select>
-                  </div>
-                  {newProduct.warranty_unit !== 'lifetime' && (
-                    <div>
-                      <label className="block text-gray-300 mb-1">Período de Garantía</label>
-                      <input
-                        type="number"
-                        value={newProduct.warranty_period || ''}
-                        onChange={(e) => setNewProduct({ ...newProduct, warranty_period: parseInt(e.target.value) || undefined })}
-                        className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
-                        placeholder="Ej: 12"
-                      />
+                  <div className="border-t border-gray-700/40 pt-3">
+                    <p className="text-[10px] text-gray-600 uppercase tracking-wide mb-2 font-medium">Calculado automáticamente</p>
+                    <div className="flex flex-wrap gap-4">
+                      {[
+                        { checked: newProduct.is_high_value || false, label: 'Alto Valor' },
+                        { checked: newProduct.requires_special_shipping || false, label: 'Envío Especial' },
+                      ].map(({ checked, label }) => (
+                        <div key={label} className="flex items-center gap-2 opacity-40">
+                          <div className={`w-4 h-4 rounded border flex items-center justify-center flex-shrink-0 ${checked ? 'bg-yellow-500/50 border-yellow-500/40' : 'bg-gray-700 border-gray-600'}`}>
+                            {checked && <svg className="w-2.5 h-2.5 text-black/70" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7"/></svg>}
+                          </div>
+                          <span className="text-sm text-gray-500">{label}</span>
+                        </div>
+                      ))}
                     </div>
-                  )}
-                </>
-              )}
-              <div className="md:col-span-2">
-                <label className="block text-gray-300 mb-1">Descripción</label>
-                <textarea
-                  value={newProduct.description || ''}
-                  onChange={(e) => setNewProduct({ ...newProduct, description: e.target.value })}
-                  className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
-                  rows={3}
-                  placeholder="Descripción del producto"
-                />
+                  </div>
+                </div>
               </div>
+
+              {/* Garantía (condicional) */}
               {newProduct.has_warranty && (
-                <div className="md:col-span-2">
-                  <label className="block text-gray-300 mb-1">Descripción de Garantía</label>
-                  <textarea
-                    value={newProduct.warranty_description || ''}
-                    onChange={(e) => setNewProduct({ ...newProduct, warranty_description: e.target.value })}
-                    className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
-                    rows={2}
-                    placeholder="Descripción detallada de la garantía"
-                  />
+                <div>
+                  <div className="flex items-center gap-2 mb-3">
+                    <RefreshCw className="h-3.5 w-3.5 text-yellow-400" />
+                    <span className="text-xs font-semibold text-yellow-400 uppercase tracking-widest">Garantía</span>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-gray-400 mb-1 text-xs font-medium uppercase tracking-wide">Unidad</label>
+                      <select value={newProduct.warranty_unit || ''} onChange={(e) => setNewProduct({ ...newProduct, warranty_unit: e.target.value, warranty_period: e.target.value === 'lifetime' ? undefined : newProduct.warranty_period })}
+                        className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:border-yellow-400/50 focus:outline-none transition-colors">
+                        <option value="">Seleccionar unidad</option>
+                        <option value="lifetime">De por vida</option>
+                        <option value="dias">Días</option>
+                        <option value="meses">Meses</option>
+                        <option value="años">Años</option>
+                      </select>
+                    </div>
+                    {newProduct.warranty_unit !== 'lifetime' && (
+                      <div>
+                        <label className="block text-gray-400 mb-1 text-xs font-medium uppercase tracking-wide">Período</label>
+                        <input type="number" value={newProduct.warranty_period || ''} onChange={(e) => setNewProduct({ ...newProduct, warranty_period: parseInt(e.target.value) || undefined })}
+                          className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:border-yellow-400/50 focus:outline-none transition-colors" placeholder="Ej: 12" />
+                      </div>
+                    )}
+                    <div className="sm:col-span-2">
+                      <label className="block text-gray-400 mb-1 text-xs font-medium uppercase tracking-wide">Descripción de garantía</label>
+                      <textarea value={newProduct.warranty_description || ''} onChange={(e) => setNewProduct({ ...newProduct, warranty_description: e.target.value })}
+                        className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:border-yellow-400/50 focus:outline-none transition-colors resize-none"
+                        rows={2} placeholder="Descripción detallada de la garantía" />
+                    </div>
+                  </div>
                 </div>
               )}
+
+              {/* Descripción */}
+              <div>
+                <label className="block text-gray-400 mb-1.5 text-xs font-medium uppercase tracking-wide">Descripción del Producto</label>
+                <textarea value={newProduct.description || ''} onChange={(e) => setNewProduct({ ...newProduct, description: e.target.value })}
+                  className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:border-yellow-400/50 focus:outline-none transition-colors resize-none"
+                  rows={3} placeholder="Descripción del producto" />
+              </div>
+
             </div>
-            <div className="flex justify-end space-x-2 mt-6">
+
+            {/* Footer sticky */}
+            <div className="flex-shrink-0 bg-gray-900/95 backdrop-blur-sm px-6 py-4 border-t border-gray-700/50 flex justify-end gap-3 rounded-b-2xl">
               <button
                 onClick={() => setShowAddProduct(false)}
-                className="px-4 py-2 bg-gray-600 hover:bg-gray-700 rounded"
+                className="px-4 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-xl text-sm text-gray-300 transition-colors cursor-pointer"
               >
                 Cancelar
               </button>
               <button
                 onClick={handleAddProduct}
-                className="px-4 py-2 bg-yellow-500 hover:bg-yellow-600 text-black rounded"
+                className="px-5 py-2 bg-yellow-500 hover:bg-yellow-400 text-black font-semibold rounded-xl text-sm transition-colors cursor-pointer"
               >
                 Agregar Producto
               </button>
@@ -3623,361 +3601,295 @@ const fetchOrderDetails = async (orderId: number) => {
 
       {/* Modal para editar producto */}
       {editingProduct && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-gray-800 rounded-lg p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-            <div className="flex justify-between items-center mb-3 sm:mb-4">
-              <h3 className="text-base sm:text-lg font-bold">Editar Producto</h3>
-              <label className="flex items-center cursor-pointer">
-                <div className="relative">
-                  <input
-                    type="checkbox"
-                    checked={editingProduct.is_active ?? true}
-                    onChange={(e) => setEditingProduct({ ...editingProduct, is_active: e.target.checked })}
-                    className="sr-only"
-                  />
-                  <div className={`block w-14 h-8 rounded-full ${
-                    editingProduct.is_active ?? true ? 'bg-green-500' : 'bg-gray-300'
-                  }`}></div>
-                  <div className={`absolute left-1 top-1 bg-white w-6 h-6 rounded-full transition-transform duration-200 ${
-                    editingProduct.is_active ?? true ? 'transform translate-x-6' : ''
-                  }`}></div>
-                </div>
-                <span className="ml-3 text-gray-300 font-medium">
-                  {editingProduct.is_active ?? true ? 'Activo' : 'Inactivo'}
-                </span>
-              </label>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
-              
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-gray-900 rounded-2xl w-full max-w-2xl max-h-[92vh] flex flex-col border border-gray-700/60 shadow-2xl">
+            {/* Header sticky */}
+            <div className="flex-shrink-0 bg-gray-900/95 backdrop-blur-sm px-6 py-4 border-b border-gray-700/50 flex justify-between items-center rounded-t-2xl">
               <div>
-                <label className="block text-gray-300 mb-1">SKU (modelo principal, solo lectura)</label>
-                <input
-                  type="text"
-                  value={editingProduct.sku ?? ''}
-                  readOnly
-                  className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 opacity-80 cursor-not-allowed"
-                  placeholder="Del modelo principal"
-                />
+                <h3 className="text-lg font-bold text-white">Editar Producto</h3>
+                <p className="text-xs text-gray-500 mt-0.5">Cambios sincronizados con la variante principal automáticamente</p>
               </div>
-              <div>
-                <label className="block text-gray-300 mb-1">Nombre</label>
-                <input
-                  type="text"
-                  value={editingProduct.name}
-                  onChange={(e) => setEditingProduct({ ...editingProduct, name: e.target.value })}
-                  className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
-                />
-              </div>
-              <div>
-                <label className="block text-gray-300 mb-1">Precio</label>
-                <input
-                  type="number"
-                  value={editingProduct.price}
-                  onChange={(e) => setEditingProduct({ ...editingProduct, price: parseFloat(e.target.value) || 0 })}
-                  className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
-                />
-              </div>
-              <div>
-                <label className="block text-gray-300 mb-1">Precio Original</label>
-                <input
-                  type="number"
-                  value={editingProduct.original_price || ''}
-                  onChange={(e) => setEditingProduct({ ...editingProduct, original_price: parseFloat(e.target.value) || undefined })}
-                  className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
-                />
-              </div>
-              <div>
-                <label className="block text-gray-300 mb-1">Categoría</label>
-                <select
-                  value={editingProduct.category_id}
-                  onChange={(e) => setEditingProduct({ ...editingProduct, category_id: parseInt(e.target.value) })}
-                  className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
-                >
-                  {categories.map(category => (
-                    <option key={category.id} value={category.id}>{category.name}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-gray-300 mb-1">Material</label>
-                <input
-                  type="text"
-                  value={editingProduct.material || ''}
-                  onChange={(e) => setEditingProduct({ ...editingProduct, material: e.target.value })}
-                  className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
-                />
-              </div>
-              <div>
-                <label className="block text-gray-300 mb-1">Metal / tipo</label>
-                <select
-                  value={(editingProduct as any).metal_type ?? ''}
-                  onChange={(e) => setEditingProduct({ ...editingProduct, metal_type: e.target.value ? Number(e.target.value) : undefined } as any)}
-                  className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
-                >
-                  <option value="">Ninguno</option>
-                  {(metalTypesList.length ? metalTypesList : metalTypes || []).map((mt: { id: number; name: string }) => (
-                    <option key={mt.id} value={mt.id}>{mt.name}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-gray-300 mb-1">Quilates (k)</label>
-                <input
-                  type="number"
-                  min={0}
-                  step={0.5}
-                  value={(editingProduct as any).carat ?? ''}
-                  onChange={(e) => setEditingProduct({ ...editingProduct, carat: e.target.value ? parseFloat(e.target.value) : undefined } as any)}
-                  className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
-                  placeholder="Ej: 14"
-                />
-              </div>
-              <div>
-                <label className="block text-gray-300 mb-1">Stock</label>
-                <input
-                  type="number"
-                  value={editingProduct.stock || 0}
-                  onChange={(e) => setEditingProduct({ ...editingProduct, stock: parseInt(e.target.value) || 0 })}
-                  className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
-                />
-              </div>
-              <div>
-                <label className="block text-gray-300 mb-1">Peso (gramos)</label>
-                <input
-                  type="number"
-                  value={editingProduct.weight_grams || 100}
-                  onChange={(e) => setEditingProduct({ ...editingProduct, weight_grams: parseFloat(e.target.value) || 100 })}
-                  className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
-                  placeholder="100"
-                  min="0"
-                  step="0.1"
-                />
-              </div>
-              {/* Configuración de imágenes (edición): las del producto base o propias de la variante */}
-              <div className="md:col-span-2">
-                <label className="block text-gray-300 mb-2 text-sm font-medium">Configuración de Imágenes</label>
-                <p className="text-xs text-gray-400 mb-2">Las imágenes del producto se gestionan abajo. Para variantes concretas, edita cada variante.</p>
-              </div>
-              <div>
-                <label className="block text-gray-300 mb-1">Imagen Principal</label>
-                <div className="space-y-2">
-                  {editingProduct.image && (
-                    isVideoUrl(editingProduct.image) ? (
-                      <video src={buildMediaUrl(editingProduct.image)} className="h-24 w-full object-cover rounded-lg" controls />
-                    ) : (
-                      <img src={buildMediaUrl(editingProduct.image)} alt={editingProduct.name} className="h-24 w-full object-cover rounded-lg" />
-                    )
-                  )}
-                  <input
-                    type="file"
-                    accept="image/*"
-                    className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-sm"
-                    onChange={async (e) => {
-                      const file = e.target.files && e.target.files[0] ? e.target.files[0] : null;
-                      setProductMainImageFile(file);
-                      if (file) {
-                        const preview = await createImagePreview(file);
-                        setProductMainImagePreview(preview);
-                      } else {
-                        setProductMainImagePreview(null);
-                      }
-                    }}
-                  />
-                  {productMainImagePreview && (
-                    <div className="mt-2">
-                      <img src={productMainImagePreview} alt="Preview" className="h-24 w-full object-cover rounded-lg border border-gray-700" />
-                    </div>
-                  )}
-                </div>
-              </div>
-              <div className="md:col-span-2 space-y-2">
-                <label className="block text-gray-300 mb-1">Imágenes Complementarias</label>
-                <div className="flex flex-wrap gap-3">
-                  {editingProduct.images && editingProduct.images.length > 0 ? (
-                    editingProduct.images.map(image => {
-                      const isMarkedForDelete = imagesToDelete.includes(image.id);
-                      return (
-                        <div key={image.id} className={`relative ${isMarkedForDelete ? 'opacity-50' : ''}`}>
-                        {isVideoUrl(image.url) ? (
-                          <video src={buildMediaUrl(image.url)} className="h-20 w-20 object-cover rounded-lg border border-gray-700" muted playsInline />
-                        ) : (
-                          <img src={buildMediaUrl(image.url)} alt={editingProduct.name} className="h-20 w-20 object-cover rounded-lg border border-gray-700" />
-                        )}
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteProductImage(image.id)}
-                            className={`absolute -top-2 -right-2 rounded-full h-5 w-5 text-xs ${isMarkedForDelete ? 'bg-gray-600 text-gray-300' : 'bg-red-600 text-white'}`}
-                            title={isMarkedForDelete ? 'Marcada para eliminar' : 'Eliminar'}
-                        >
-                            {isMarkedForDelete ? '↩' : '×'}
-                        </button>
-                      </div>
-                      );
-                    })
-                  ) : (
-                    <p className="text-gray-500 text-sm">Sin imágenes adicionales</p>
-                  )}
-                </div>
-                <input
-                  type="file"
-                  accept="image/*"
-                  multiple
-                  className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 mb-2 text-sm"
-                  onChange={async (e) => {
-                    const files = e.target.files;
-                    setEditingProductGalleryFiles(files);
-                    if (files) {
-                      const previews = await Promise.all(Array.from(files).map(createImagePreview));
-                      setEditingProductGalleryPreviews(previews);
-                    } else {
-                      setEditingProductGalleryPreviews([]);
-                    }
-                  }}
-                />
-                {editingProductGalleryPreviews.length > 0 && (
-                  <div className="flex flex-wrap gap-2 mt-2 mb-2">
-                    {editingProductGalleryPreviews.map((preview, idx) => (
-                      <img key={idx} src={preview} alt={`Preview ${idx + 1}`} className="h-20 w-20 object-cover rounded-lg border border-gray-700" />
-                    ))}
+              <div className="flex items-center gap-3">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <div className="relative">
+                    <input type="checkbox" checked={editingProduct.is_active ?? true} onChange={(e) => setEditingProduct({ ...editingProduct, is_active: e.target.checked })} className="sr-only" />
+                    <div className={`block w-12 h-6 rounded-full transition-colors ${editingProduct.is_active ?? true ? 'bg-green-500' : 'bg-gray-600'}`}></div>
+                    <div className={`absolute left-0.5 top-0.5 bg-white w-5 h-5 rounded-full shadow transition-transform duration-200 ${editingProduct.is_active ?? true ? 'translate-x-6' : ''}`}></div>
                   </div>
-                )}
+                  <span className={`text-sm font-medium ${editingProduct.is_active ?? true ? 'text-green-400' : 'text-gray-500'}`}>{editingProduct.is_active ?? true ? 'Activo' : 'Inactivo'}</span>
+                </label>
+                <button
+                  onClick={() => { setEditingProduct(null); setProductMainImageFile(null); setProductMainImagePreview(null); setEditingProductGalleryFiles(null); setEditingProductGalleryPreviews([]); setImagesToDelete([]); }}
+                  className="p-1.5 rounded-lg text-gray-500 hover:text-white hover:bg-gray-700 transition-all cursor-pointer"
+                >
+                  <X className="h-5 w-5" />
+                </button>
               </div>
-              {/* Estado y Envío y valor: una fila cada uno */}
-              <div className="md:col-span-2">
-                <span className="text-gray-300 text-sm font-medium block mb-2">Estado</span>
-                <div className="flex flex-wrap gap-4 mb-4">
-                  <label className="flex items-center">
-                    <input
-                      type="checkbox"
-                      checked={editingProduct.in_stock || false}
-                      onChange={(e) => setEditingProduct({ ...editingProduct, in_stock: e.target.checked })}
-                      className="mr-2"
-                    />
-                    En Stock
-                  </label>
-                  <label className="flex items-center">
-                    <input
-                      type="checkbox"
-                      checked={editingProduct.is_new || false}
-                      onChange={(e) => setEditingProduct({ ...editingProduct, is_new: e.target.checked })}
-                      className="mr-2"
-                    />
-                    Nuevo
-                  </label>
-                  <label className="flex items-center">
-                    <input
-                      type="checkbox"
-                      checked={editingProduct.is_featured || false}
-                      onChange={(e) => setEditingProduct({ ...editingProduct, is_featured: e.target.checked })}
-                      className="mr-2"
-                    />
-                    Destacado
-                  </label>
+            </div>
+
+            {/* Contenido scrollable */}
+            <div className="flex-1 overflow-y-auto p-6 space-y-6">
+
+              {/* Identificación */}
+              <div>
+                <div className="flex items-center gap-2 mb-3">
+                  <Tag className="h-3.5 w-3.5 text-yellow-400" />
+                  <span className="text-xs font-semibold text-yellow-400 uppercase tracking-widest">Identificación</span>
                 </div>
-                <span className="text-gray-300 text-sm font-medium block mb-2">Envío y valor</span>
-                <div className="flex flex-wrap gap-4">
-                  <label className="flex items-center opacity-60 cursor-not-allowed">
-                    <input
-                      type="checkbox"
-                      checked={editingProduct.is_high_value || false}
-                      disabled
-                      className="mr-2"
-                    />
-                    Alto Valor (automático)
-                  </label>
-                  <label className="flex items-center opacity-60 cursor-not-allowed">
-                    <input
-                      type="checkbox"
-                      checked={editingProduct.requires_special_shipping || false}
-                      disabled
-                      className="mr-2"
-                    />
-                    Envío Especial (automático)
-                  </label>
-                  <label className="flex items-center">
-                    <input
-                      type="checkbox"
-                      checked={editingProduct.has_warranty || false}
-                      onChange={(e) => setEditingProduct({ ...editingProduct, has_warranty: e.target.checked })}
-                      className="mr-2"
-                    />
-                    Tiene Garantía
-                  </label>
-                </div>
-              </div>
-              {editingProduct.has_warranty && (
-                <>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-gray-300 mb-1">Unidad de Garantía</label>
-                    <select
-                      value={editingProduct.warranty_unit || ''}
-                      onChange={(e) => setEditingProduct({
-                        ...editingProduct,
-                        warranty_unit: e.target.value,
-                        warranty_period: e.target.value === 'lifetime' ? undefined : editingProduct.warranty_period
-                      })}
-                      className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
-                    >
-                      <option value="">Seleccionar unidad</option>
-                      <option value="lifetime">De por vida</option>
-                      <option value="dias">Días</option>
-                      <option value="meses">Meses</option>
-                      <option value="años">Años</option>
+                    <label className="block text-gray-400 mb-1 text-xs font-medium uppercase tracking-wide">SKU (modelo principal)</label>
+                    <input type="text" value={editingProduct.sku ?? ''} readOnly
+                      className="w-full bg-gray-800/50 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-500 cursor-not-allowed"
+                      placeholder="Del modelo principal" />
+                  </div>
+                  <div>
+                    <label className="block text-gray-400 mb-1 text-xs font-medium uppercase tracking-wide">Nombre del producto</label>
+                    <input type="text" value={editingProduct.name} onChange={(e) => setEditingProduct({ ...editingProduct, name: e.target.value })}
+                      className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:border-yellow-400/50 focus:outline-none transition-colors" />
+                  </div>
+                  <div>
+                    <label className="block text-gray-400 mb-1 text-xs font-medium uppercase tracking-wide">Categoría</label>
+                    <select value={editingProduct.category_id} onChange={(e) => setEditingProduct({ ...editingProduct, category_id: parseInt(e.target.value) })}
+                      className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:border-yellow-400/50 focus:outline-none transition-colors">
+                      {categories.map(category => (<option key={category.id} value={category.id}>{category.name}</option>))}
                     </select>
                   </div>
-                  {editingProduct.warranty_unit !== 'lifetime' && (
-                    <div>
-                      <label className="block text-gray-300 mb-1">Período de Garantía</label>
-                      <input
-                        type="number"
-                        value={editingProduct.warranty_period || ''}
-                        onChange={(e) => setEditingProduct({ ...editingProduct, warranty_period: parseInt(e.target.value) || undefined })}
-                        className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
-                        placeholder="Ej: 12"
-                      />
-                    </div>
-                  )}
-                </>
-              )}
-              <div className="md:col-span-2">
-                <label className="block text-gray-300 mb-1">Descripción</label>
-                <textarea
-                  value={editingProduct.description || ''}
-                  onChange={(e) => setEditingProduct({ ...editingProduct, description: e.target.value })}
-                  className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
-                  rows={3}
-                />
+                  <div>
+                    <label className="block text-gray-400 mb-1 text-xs font-medium uppercase tracking-wide">Material</label>
+                    <input type="text" value={editingProduct.material || ''} onChange={(e) => setEditingProduct({ ...editingProduct, material: e.target.value })}
+                      className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:border-yellow-400/50 focus:outline-none transition-colors"
+                      placeholder="Oro, plata, etc." />
+                  </div>
+                </div>
               </div>
+
+              {/* Precios y Stock */}
+              <div>
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="text-yellow-400 text-sm font-bold leading-none">$</span>
+                  <span className="text-xs font-semibold text-yellow-400 uppercase tracking-widest">Precios y Stock</span>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-gray-400 mb-1 text-xs font-medium uppercase tracking-wide">Precio</label>
+                    <input type="number" value={editingProduct.price} onChange={(e) => setEditingProduct({ ...editingProduct, price: parseFloat(e.target.value) || 0 })}
+                      className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:border-yellow-400/50 focus:outline-none transition-colors" placeholder="0.00" />
+                  </div>
+                  <div>
+                    <label className="block text-gray-400 mb-1 text-xs font-medium uppercase tracking-wide">Precio original</label>
+                    <input type="number" value={editingProduct.original_price || ''} onChange={(e) => setEditingProduct({ ...editingProduct, original_price: parseFloat(e.target.value) || undefined })}
+                      className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:border-yellow-400/50 focus:outline-none transition-colors" placeholder="0.00" />
+                  </div>
+                  <div>
+                    <label className="block text-gray-400 mb-1 text-xs font-medium uppercase tracking-wide">Stock</label>
+                    <input type="number" value={editingProduct.stock || 0} onChange={(e) => setEditingProduct({ ...editingProduct, stock: parseInt(e.target.value) || 0 })}
+                      className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:border-yellow-400/50 focus:outline-none transition-colors" placeholder="0" />
+                  </div>
+                </div>
+              </div>
+
+              {/* Clasificación */}
+              <div>
+                <div className="flex items-center gap-2 mb-3">
+                  <Package className="h-3.5 w-3.5 text-yellow-400" />
+                  <span className="text-xs font-semibold text-yellow-400 uppercase tracking-widest">Clasificación</span>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-gray-400 mb-1 text-xs font-medium uppercase tracking-wide">Metal / tipo</label>
+                    <select value={(editingProduct as any).metal_type ?? ''} onChange={(e) => setEditingProduct({ ...editingProduct, metal_type: e.target.value ? Number(e.target.value) : undefined } as any)}
+                      className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:border-yellow-400/50 focus:outline-none transition-colors">
+                      <option value="">Ninguno</option>
+                      {(metalTypesList.length ? metalTypesList : metalTypes || []).map((mt: { id: number; name: string }) => (
+                        <option key={mt.id} value={mt.id}>{mt.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-gray-400 mb-1 text-xs font-medium uppercase tracking-wide">Quilates (k)</label>
+                    <input type="number" min={0} step={0.5} value={(editingProduct as any).carat ?? ''} onChange={(e) => setEditingProduct({ ...editingProduct, carat: e.target.value ? parseFloat(e.target.value) : undefined } as any)}
+                      className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:border-yellow-400/50 focus:outline-none transition-colors" placeholder="Ej: 14" />
+                  </div>
+                  <div>
+                    <label className="block text-gray-400 mb-1 text-xs font-medium uppercase tracking-wide">Peso (gramos)</label>
+                    <input type="number" value={editingProduct.weight_grams || 100} onChange={(e) => setEditingProduct({ ...editingProduct, weight_grams: parseFloat(e.target.value) || 100 })}
+                      className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:border-yellow-400/50 focus:outline-none transition-colors" placeholder="100" min="0" step="0.1" />
+                  </div>
+                </div>
+              </div>
+
+              {/* Imágenes */}
+              <div>
+                <div className="flex items-center gap-2 mb-3">
+                  <Image className="h-3.5 w-3.5 text-yellow-400" />
+                  <span className="text-xs font-semibold text-yellow-400 uppercase tracking-widest">Imágenes</span>
+                </div>
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-gray-400 mb-1.5 text-xs font-medium uppercase tracking-wide">Imagen Principal</label>
+                    <div className="space-y-2">
+                      {editingProduct.image && !productMainImagePreview && (
+                        isVideoUrl(editingProduct.image) ? (
+                          <video src={buildMediaUrl(editingProduct.image)} className="h-28 w-full object-cover rounded-xl border border-gray-700" controls />
+                        ) : (
+                          <img src={buildMediaUrl(editingProduct.image)} alt={editingProduct.name} className="h-28 w-full object-cover rounded-xl border border-gray-700" />
+                        )
+                      )}
+                      {productMainImagePreview && (
+                        <img src={productMainImagePreview} alt="Preview nueva" className="h-28 w-full object-cover rounded-xl border border-yellow-400/40" />
+                      )}
+                      <input type="file" accept="image/*"
+                        className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-400 file:mr-3 file:py-1 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-medium file:bg-yellow-500/20 file:text-yellow-400 hover:file:bg-yellow-500/30 cursor-pointer"
+                        onChange={async (e) => {
+                          const file = e.target.files && e.target.files[0] ? e.target.files[0] : null;
+                          setProductMainImageFile(file);
+                          if (file) { const preview = await createImagePreview(file); setProductMainImagePreview(preview); } else { setProductMainImagePreview(null); }
+                        }} />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-gray-400 mb-1.5 text-xs font-medium uppercase tracking-wide">Galería</label>
+                    <div className="flex flex-wrap gap-2 mb-2">
+                      {editingProduct.images && editingProduct.images.length > 0 ? (
+                        editingProduct.images.map(image => {
+                          const isMarkedForDelete = imagesToDelete.includes(image.id);
+                          return (
+                            <div key={image.id} className={`relative ${isMarkedForDelete ? 'opacity-40' : ''}`}>
+                              {isVideoUrl(image.url) ? (
+                                <video src={buildMediaUrl(image.url)} className="h-20 w-20 object-cover rounded-xl border border-gray-700" muted playsInline />
+                              ) : (
+                                <img src={buildMediaUrl(image.url)} alt={editingProduct.name} className="h-20 w-20 object-cover rounded-xl border border-gray-700" />
+                              )}
+                              <button type="button" onClick={() => handleDeleteProductImage(image.id)}
+                                className={`absolute -top-1.5 -right-1.5 rounded-full h-5 w-5 text-xs flex items-center justify-center font-bold shadow-lg transition-all cursor-pointer ${isMarkedForDelete ? 'bg-gray-600 text-gray-300 hover:bg-gray-500' : 'bg-red-500 text-white hover:bg-red-400'}`}
+                                title={isMarkedForDelete ? 'Restaurar' : 'Eliminar'}>
+                                {isMarkedForDelete ? '↩' : '×'}
+                              </button>
+                            </div>
+                          );
+                        })
+                      ) : (
+                        <p className="text-gray-600 text-xs italic">Sin imágenes adicionales</p>
+                      )}
+                    </div>
+                    <input type="file" accept="image/*" multiple
+                      className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-400 file:mr-3 file:py-1 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-medium file:bg-yellow-500/20 file:text-yellow-400 hover:file:bg-yellow-500/30 cursor-pointer"
+                      onChange={async (e) => {
+                        const files = e.target.files;
+                        setEditingProductGalleryFiles(files);
+                        if (files) { const previews = await Promise.all(Array.from(files).map(createImagePreview)); setEditingProductGalleryPreviews(previews); } else { setEditingProductGalleryPreviews([]); }
+                      }} />
+                    {editingProductGalleryPreviews.length > 0 && (
+                      <div className="flex flex-wrap gap-2 mt-2">
+                        {editingProductGalleryPreviews.map((preview, idx) => (
+                          <img key={idx} src={preview} alt={`Preview ${idx + 1}`} className="h-20 w-20 object-cover rounded-xl border border-yellow-400/30" />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Estado y Características */}
+              <div>
+                <div className="flex items-center gap-2 mb-3">
+                  <AlertCircle className="h-3.5 w-3.5 text-yellow-400" />
+                  <span className="text-xs font-semibold text-yellow-400 uppercase tracking-widest">Estado y Características</span>
+                </div>
+                <div className="bg-gray-800/40 rounded-xl p-4 border border-gray-700/40 space-y-3">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-y-3 gap-x-4">
+                    {[
+                      { label: 'En Stock', checked: editingProduct.in_stock || false, onChange: (v: boolean) => setEditingProduct({ ...editingProduct, in_stock: v }) },
+                      { label: 'Nuevo', checked: editingProduct.is_new || false, onChange: (v: boolean) => setEditingProduct({ ...editingProduct, is_new: v }) },
+                      { label: 'Destacado', checked: editingProduct.is_featured || false, onChange: (v: boolean) => setEditingProduct({ ...editingProduct, is_featured: v }) },
+                      { label: 'Garantía', checked: editingProduct.has_warranty || false, onChange: (v: boolean) => setEditingProduct({ ...editingProduct, has_warranty: v }) },
+                    ].map(({ label, checked, onChange }) => (
+                      <label key={label} className="flex items-center gap-2 cursor-pointer group/ck">
+                        <div className={`w-4 h-4 rounded border flex items-center justify-center flex-shrink-0 transition-colors ${checked ? 'bg-yellow-500 border-yellow-500' : 'bg-gray-700 border-gray-600 group-hover/ck:border-gray-400'}`}>
+                          {checked && <svg className="w-2.5 h-2.5 text-black" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7"/></svg>}
+                        </div>
+                        <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} className="sr-only" />
+                        <span className="text-sm text-gray-300">{label}</span>
+                      </label>
+                    ))}
+                  </div>
+                  <div className="border-t border-gray-700/40 pt-3">
+                    <p className="text-[10px] text-gray-600 uppercase tracking-wide mb-2 font-medium">Calculado automáticamente</p>
+                    <div className="flex flex-wrap gap-4">
+                      {[
+                        { checked: editingProduct.is_high_value || false, label: 'Alto Valor' },
+                        { checked: editingProduct.requires_special_shipping || false, label: 'Envío Especial' },
+                      ].map(({ checked, label }) => (
+                        <div key={label} className="flex items-center gap-2 opacity-40">
+                          <div className={`w-4 h-4 rounded border flex items-center justify-center flex-shrink-0 ${checked ? 'bg-yellow-500/50 border-yellow-500/40' : 'bg-gray-700 border-gray-600'}`}>
+                            {checked && <svg className="w-2.5 h-2.5 text-black/70" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7"/></svg>}
+                          </div>
+                          <span className="text-sm text-gray-500">{label}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Garantía (condicional) */}
               {editingProduct.has_warranty && (
-                <div className="md:col-span-2">
-                  <label className="block text-gray-300 mb-1">Descripción de Garantía</label>
-                  <textarea
-                    value={editingProduct.warranty_description || ''}
-                    onChange={(e) => setEditingProduct({ ...editingProduct, warranty_description: e.target.value })}
-                    className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
-                    rows={2}
-                    placeholder="Descripción detallada de la garantía"
-                  />
+                <div>
+                  <div className="flex items-center gap-2 mb-3">
+                    <RefreshCw className="h-3.5 w-3.5 text-yellow-400" />
+                    <span className="text-xs font-semibold text-yellow-400 uppercase tracking-widest">Garantía</span>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-gray-400 mb-1 text-xs font-medium uppercase tracking-wide">Unidad</label>
+                      <select value={editingProduct.warranty_unit || ''} onChange={(e) => setEditingProduct({ ...editingProduct, warranty_unit: e.target.value, warranty_period: e.target.value === 'lifetime' ? undefined : editingProduct.warranty_period })}
+                        className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:border-yellow-400/50 focus:outline-none transition-colors">
+                        <option value="">Seleccionar unidad</option>
+                        <option value="lifetime">De por vida</option>
+                        <option value="dias">Días</option>
+                        <option value="meses">Meses</option>
+                        <option value="años">Años</option>
+                      </select>
+                    </div>
+                    {editingProduct.warranty_unit !== 'lifetime' && (
+                      <div>
+                        <label className="block text-gray-400 mb-1 text-xs font-medium uppercase tracking-wide">Período</label>
+                        <input type="number" value={editingProduct.warranty_period || ''} onChange={(e) => setEditingProduct({ ...editingProduct, warranty_period: parseInt(e.target.value) || undefined })}
+                          className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:border-yellow-400/50 focus:outline-none transition-colors" placeholder="Ej: 12" />
+                      </div>
+                    )}
+                    <div className="sm:col-span-2">
+                      <label className="block text-gray-400 mb-1 text-xs font-medium uppercase tracking-wide">Descripción de garantía</label>
+                      <textarea value={editingProduct.warranty_description || ''} onChange={(e) => setEditingProduct({ ...editingProduct, warranty_description: e.target.value })}
+                        className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:border-yellow-400/50 focus:outline-none transition-colors resize-none"
+                        rows={2} placeholder="Descripción detallada de la garantía" />
+                    </div>
+                  </div>
                 </div>
               )}
+
+              {/* Descripción */}
+              <div>
+                <label className="block text-gray-400 mb-1.5 text-xs font-medium uppercase tracking-wide">Descripción del Producto</label>
+                <textarea value={editingProduct.description || ''} onChange={(e) => setEditingProduct({ ...editingProduct, description: e.target.value })}
+                  className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:border-yellow-400/50 focus:outline-none transition-colors resize-none"
+                  rows={3} placeholder="Descripción del producto" />
+              </div>
+
             </div>
-            <div className="flex justify-end space-x-2 mt-6">
+
+            {/* Footer sticky */}
+            <div className="flex-shrink-0 bg-gray-900/95 backdrop-blur-sm px-6 py-4 border-t border-gray-700/50 flex justify-end gap-3 rounded-b-2xl">
               <button
-                onClick={() => {
-                  setEditingProduct(null);
-                  setProductMainImageFile(null);
-                  setProductMainImagePreview(null);
-                  setEditingProductGalleryFiles(null);
-                  setEditingProductGalleryPreviews([]);
-                  setImagesToDelete([]);
-                }}
-                className="px-4 py-2 bg-gray-600 hover:bg-gray-700 rounded text-sm"
+                onClick={() => { setEditingProduct(null); setProductMainImageFile(null); setProductMainImagePreview(null); setEditingProductGalleryFiles(null); setEditingProductGalleryPreviews([]); setImagesToDelete([]); }}
+                className="px-4 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-xl text-sm text-gray-300 transition-colors cursor-pointer"
               >
                 Cancelar
               </button>
               <button
                 onClick={() => handleEditProduct(editingProduct)}
-                className="px-4 py-2 bg-yellow-500 hover:bg-yellow-600 text-black rounded"
+                className="px-5 py-2 bg-yellow-500 hover:bg-yellow-400 text-black font-semibold rounded-xl text-sm transition-colors cursor-pointer"
               >
                 Guardar Cambios
               </button>
@@ -4200,233 +4112,172 @@ const fetchOrderDetails = async (orderId: number) => {
 
       {/* Modal para agregar variante */}
       {showAddVariant.show && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-gray-800 rounded-lg p-6 w-full max-w-md">
-            <div className="flex items-center justify-between mb-3 sm:mb-4">
-              <h3 className="text-base sm:text-lg font-bold">Agregar Variante</h3>
-              <label className="flex items-center cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={newVariant.is_active ?? true}
-                  onChange={(e) => setNewVariant({ ...newVariant, is_active: e.target.checked })}
-                  className="sr-only"
-                />
-                <div className={`relative inline-block w-14 h-8 rounded-full ${newVariant.is_active ? 'bg-green-500' : 'bg-gray-300'}`}>
-                  <div className={`absolute left-1 top-1 bg-white w-6 h-6 rounded-full transition-transform duration-200 ${newVariant.is_active ? 'transform translate-x-6' : ''}`} />
-                </div>
-                <span className="ml-2 text-gray-300 text-sm">Activo</span>
-              </label>
-            </div>
-            <div className="space-y-3 sm:space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-gray-300 mb-1">SKU</label>
-                  <input
-                    type="text"
-                    value={newVariant.sku || ''}
-                    onChange={(e) => setNewVariant({ ...newVariant, sku: e.target.value })}
-                    className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
-                    placeholder="Ej: VAR-001"
-                  />
-                </div>
-                <div>
-                  <label className="block text-gray-300 mb-1">Nombre</label>
-                  <input
-                    type="text"
-                    value={newVariant.name}
-                    onChange={(e) => setNewVariant({ ...newVariant, name: e.target.value })}
-                    className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
-                  />
-                </div>
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-gray-900 rounded-2xl w-full max-w-2xl max-h-[92vh] flex flex-col border border-gray-700/60 shadow-2xl">
+
+            {/* Header sticky */}
+            <div className="flex-shrink-0 bg-gray-900/95 backdrop-blur-sm px-6 py-4 border-b border-gray-700/50 flex justify-between items-center rounded-t-2xl">
+              <div>
+                <h3 className="text-lg font-bold text-white">Nueva Variante</h3>
+                <p className="text-xs text-gray-500 mt-0.5">Completa los datos para agregar la variante</p>
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-gray-300 mb-1">Precio</label>
-                  <input
-                    type="number"
-                    value={newVariant.price}
-                    onChange={(e) => setNewVariant({ ...newVariant, price: parseFloat(e.target.value) || 0 })}
-                    className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
-                  />
-                </div>
-                <div>
-                  <label className="block text-gray-300 mb-1">Precio Original</label>
-                  <input
-                    type="number"
-                    value={newVariant.original_price || ''}
-                    onChange={(e) => setNewVariant({ ...newVariant, original_price: e.target.value ? parseFloat(e.target.value) : undefined })}
-                    className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
-                  />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-gray-300 mb-1">Modelo</label>
-                  <input
-                    type="text"
-                    value={newVariant.model}
-                    onChange={(e) => setNewVariant({ ...newVariant, model: e.target.value })}
-                    className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
-                  />
-                </div>
-                <div>
-                  <label className="block text-gray-300 mb-1">Talla</label>
-                  <input
-                    type="text"
-                    value={newVariant.size}
-                    onChange={(e) => setNewVariant({ ...newVariant, size: e.target.value })}
-                    className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
-                  />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-gray-300 mb-1">Metal / tipo</label>
-                  <select
-                    value={newVariant.metal_type ?? ''}
-                    onChange={(e) => setNewVariant({ ...newVariant, metal_type: e.target.value ? Number(e.target.value) : null })}
-                    className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
+              <div className="flex items-center gap-3">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <span className="text-xs text-gray-400">Activo</span>
+                  <div
+                    onClick={() => setNewVariant({ ...newVariant, is_active: !(newVariant.is_active ?? true) })}
+                    className={`relative w-10 h-5 rounded-full transition-colors cursor-pointer ${(newVariant.is_active ?? true) ? 'bg-green-500' : 'bg-gray-600'}`}
                   >
-                    <option value="">Ninguno</option>
-                    {(metalTypesList.length ? metalTypesList : metalTypes || []).map((mt: { id: number; name: string }) => (
-                      <option key={mt.id} value={mt.id}>{mt.name}</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-gray-300 mb-1">Quilates (k)</label>
-                  <input
-                    type="number"
-                    min={0}
-                    step={0.5}
-                    value={newVariant.carat ?? ''}
-                    onChange={(e) => setNewVariant({ ...newVariant, carat: e.target.value ? parseFloat(e.target.value) : undefined })}
-                    className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
-                    placeholder="Ej: 14"
-                  />
-                </div>
+                    <div className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${(newVariant.is_active ?? true) ? 'translate-x-5' : 'translate-x-0'}`} />
+                  </div>
+                </label>
+                <button
+                  onClick={() => {
+                    setShowAddVariant({ show: false, productId: null });
+                    setNewVariantGalleryFiles(null);
+                    setNewVariantImagePreview(null);
+                    setNewVariantGalleryPreviews([]);
+                    setNewVariant({ sku: '', name: '', price: 0, original_price: undefined, model: '', size: '', stock: 0, metal_type: null, carat: undefined, imageFile: null, is_active: true, is_default: false, use_product_images: true, use_model_images: false, image_reference_variant_id: null });
+                  }}
+                  className="p-1.5 rounded-lg hover:bg-gray-700/60 text-gray-400 hover:text-white transition-colors"
+                >
+                  <X className="h-5 w-5" />
+                </button>
               </div>
+            </div>
+
+            {/* Body scrollable */}
+            <div className="flex-1 overflow-y-auto px-6 py-5 space-y-6">
+
+              {/* Identificación */}
               <div>
-                <label className="block text-gray-300 mb-1">Stock</label>
-                <input
-                  type="number"
-                  value={newVariant.stock}
-                  onChange={(e) => setNewVariant({ ...newVariant, stock: parseInt(e.target.value) || 0 })}
-                  className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
-                />
-              </div>
-              {/* Configuración de imágenes: primero elección, después subida */}
-              <div className="md:col-span-2">
-                <label className="block text-gray-300 mb-2 text-sm font-medium">Configuración de Imágenes</label>
-                <div className="bg-gray-700/50 rounded-lg p-4 space-y-3">
+                <div className="flex items-center gap-2 mb-3">
+                  <Tag className="h-4 w-4 text-yellow-400" />
+                  <span className="text-[11px] font-semibold text-gray-400 uppercase tracking-widest">Identificación</span>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="flex items-start cursor-pointer">
-                      <input
-                        type="radio"
-                        name="newImageMode"
-                        checked={newVariant.use_product_images === true && newVariant.use_model_images !== true}
-                        onChange={() => setNewVariant({ 
-                          ...newVariant, 
-                          use_product_images: true, 
-                          use_model_images: false,
-                          image_reference_variant_id: null
-                        })}
-                        className="mt-1 mr-2"
-                      />
-                      <div className="flex-1">
-                        <span className="text-sm font-medium text-gray-200">Usar imágenes del producto base</span>
-                        <p className="text-xs text-gray-400 mt-0.5">La variante usará las imágenes del producto principal</p>
-                      </div>
-                    </label>
+                    <label className="block text-xs font-medium text-gray-400 mb-1.5">SKU</label>
+                    <input
+                      type="text"
+                      value={newVariant.sku || ''}
+                      onChange={(e) => setNewVariant({ ...newVariant, sku: e.target.value })}
+                      className="w-full bg-gray-800 border border-gray-700/60 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-yellow-500/50 transition-colors"
+                      placeholder="Ej: VAR-001"
+                    />
                   </div>
-                  
                   <div>
-                    <label className="flex items-start cursor-pointer">
-                      <input
-                        type="radio"
-                        name="newImageMode"
-                        checked={newVariant.use_product_images !== true && newVariant.use_model_images !== true}
-                        onChange={() => setNewVariant({ 
-                          ...newVariant, 
-                          use_product_images: false, 
-                          use_model_images: false,
-                          image_reference_variant_id: null
-                        })}
-                        className="mt-1 mr-2"
-                      />
-                      <div className="flex-1">
-                        <span className="text-sm font-medium text-gray-200">Usar imágenes propias</span>
-                        <p className="text-xs text-gray-400 mt-0.5">La variante usará sus propias imágenes (subidas arriba)</p>
-                      </div>
-                    </label>
-                  </div>
-                  
-                  <div>
-                    <label className="flex items-start cursor-pointer">
-                      <input
-                        type="radio"
-                        name="newImageMode"
-                        checked={newVariant.use_model_images === true && !newVariant.image_reference_variant_id}
-                        onChange={() => setNewVariant({ 
-                          ...newVariant, 
-                          use_product_images: false, 
-                          use_model_images: true,
-                          image_reference_variant_id: null
-                        })}
-                        className="mt-1 mr-2"
-                      />
-                      <div className="flex-1">
-                        <span className="text-sm font-medium text-gray-200">Usar imágenes de otra variante del mismo modelo</span>
-                        <p className="text-xs text-gray-400 mt-0.5">Buscará automáticamente otra variante del mismo modelo con imágenes</p>
-                      </div>
-                    </label>
-                  </div>
-                  
-                  <div>
-                    <label className="flex items-start cursor-pointer">
-                      <input
-                        type="radio"
-                        name="newImageMode"
-                        checked={newVariant.use_model_images === true && !!newVariant.image_reference_variant_id}
-                        onChange={() => setNewVariant({ 
-                          ...newVariant, 
-                          use_product_images: false, 
-                          use_model_images: true
-                        })}
-                        className="mt-1 mr-2"
-                      />
-                      <div className="flex-1">
-                        <span className="text-sm font-medium text-gray-200">Usar imágenes de otra variante específica</span>
-                        <p className="text-xs text-gray-400 mt-0.5">Selecciona una variante específica de la que heredar imágenes</p>
-                        {newVariant.use_model_images === true && (
-                          <select
-                            value={newVariant.image_reference_variant_id || ''}
-                            onChange={(e) => setNewVariant({ 
-                              ...newVariant, 
-                              image_reference_variant_id: e.target.value ? Number(e.target.value) : null
-                            })}
-                            className="mt-2 w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-sm text-white"
-                          >
-                            <option value="">Seleccionar variante...</option>
-                            {(() => {
-                              const productVariants = variants[showAddVariant.productId || 0] || [];
-                              return productVariants
-                                .filter(v => (v.variant_images?.length ?? 0) > 0 || v.image)
-                                .map(v => (
-                                  <option key={v.id} value={v.id}>
-                                    {v.name} {v.model ? `(${v.model})` : ''} {v.size ? `- ${v.size}` : ''}
-                                  </option>
-                                ));
-                            })()}
-                          </select>
-                        )}
-                      </div>
-                    </label>
+                    <label className="block text-xs font-medium text-gray-400 mb-1.5">Nombre</label>
+                    <input
+                      type="text"
+                      value={newVariant.name}
+                      onChange={(e) => setNewVariant({ ...newVariant, name: e.target.value })}
+                      className="w-full bg-gray-800 border border-gray-700/60 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-yellow-500/50 transition-colors"
+                      placeholder="Nombre de la variante"
+                    />
                   </div>
                 </div>
               </div>
+
+              {/* Precios y Stock */}
               <div>
-                <label className="block text-gray-300 mb-1 text-sm">Imagen Principal</label>
+                <div className="flex items-center gap-2 mb-3">
+                  <DollarSign className="h-4 w-4 text-yellow-400" />
+                  <span className="text-[11px] font-semibold text-gray-400 uppercase tracking-widest">Precios y Stock</span>
+                </div>
+                <div className="grid grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-400 mb-1.5">Precio *</label>
+                    <input
+                      type="number"
+                      value={newVariant.price}
+                      onChange={(e) => setNewVariant({ ...newVariant, price: parseFloat(e.target.value) || 0 })}
+                      className="w-full bg-gray-800 border border-gray-700/60 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-yellow-500/50 transition-colors"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-400 mb-1.5">Precio Original</label>
+                    <input
+                      type="number"
+                      value={newVariant.original_price || ''}
+                      onChange={(e) => setNewVariant({ ...newVariant, original_price: e.target.value ? parseFloat(e.target.value) : undefined })}
+                      className="w-full bg-gray-800 border border-gray-700/60 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-yellow-500/50 transition-colors"
+                      placeholder="Tachado"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-400 mb-1.5">Stock</label>
+                    <input
+                      type="number"
+                      value={newVariant.stock}
+                      onChange={(e) => setNewVariant({ ...newVariant, stock: parseInt(e.target.value) || 0 })}
+                      className="w-full bg-gray-800 border border-gray-700/60 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-yellow-500/50 transition-colors"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Clasificación */}
+              <div>
+                <div className="flex items-center gap-2 mb-3">
+                  <Package className="h-4 w-4 text-yellow-400" />
+                  <span className="text-[11px] font-semibold text-gray-400 uppercase tracking-widest">Clasificación</span>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-400 mb-1.5">Modelo</label>
+                    <input
+                      type="text"
+                      value={newVariant.model}
+                      onChange={(e) => setNewVariant({ ...newVariant, model: e.target.value })}
+                      className="w-full bg-gray-800 border border-gray-700/60 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-yellow-500/50 transition-colors"
+                      placeholder="Ej: Modelo A"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-400 mb-1.5">Talla</label>
+                    <input
+                      type="text"
+                      value={newVariant.size}
+                      onChange={(e) => setNewVariant({ ...newVariant, size: e.target.value })}
+                      className="w-full bg-gray-800 border border-gray-700/60 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-yellow-500/50 transition-colors"
+                      placeholder="Ej: 7"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-400 mb-1.5">Metal / tipo</label>
+                    <select
+                      value={newVariant.metal_type ?? ''}
+                      onChange={(e) => setNewVariant({ ...newVariant, metal_type: e.target.value ? Number(e.target.value) : null })}
+                      className="w-full bg-gray-800 border border-gray-700/60 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-yellow-500/50 transition-colors"
+                    >
+                      <option value="">Ninguno</option>
+                      {(metalTypesList.length ? metalTypesList : metalTypes || []).map((mt: { id: number; name: string }) => (
+                        <option key={mt.id} value={mt.id}>{mt.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-400 mb-1.5">Quilates (k)</label>
+                    <input
+                      type="number"
+                      min={0}
+                      step={0.5}
+                      value={newVariant.carat ?? ''}
+                      onChange={(e) => setNewVariant({ ...newVariant, carat: e.target.value ? parseFloat(e.target.value) : undefined })}
+                      className="w-full bg-gray-800 border border-gray-700/60 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-yellow-500/50 transition-colors"
+                      placeholder="Ej: 14"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Imagen Principal */}
+              <div>
+                <div className="flex items-center gap-2 mb-3">
+                  <Image className="h-4 w-4 text-yellow-400" />
+                  <span className="text-[11px] font-semibold text-gray-400 uppercase tracking-widest">Imagen Principal</span>
+                </div>
                 <input
                   type="file"
                   accept="image/*"
@@ -4440,21 +4291,117 @@ const fetchOrderDetails = async (orderId: number) => {
                       setNewVariantImagePreview(null);
                     }
                   }}
-                  className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-sm"
+                  className="w-full bg-gray-800 border border-gray-700/60 rounded-lg px-3 py-2 text-sm text-gray-300 file:mr-3 file:py-1 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-medium file:bg-yellow-500/20 file:text-yellow-400 hover:file:bg-yellow-500/30 transition-colors cursor-pointer"
                 />
                 {newVariantImagePreview && (
                   <div className="mt-2">
-                    <img src={newVariantImagePreview} alt="Preview" className="h-24 w-full object-cover rounded-lg border border-gray-700" />
+                    <img src={newVariantImagePreview} alt="Preview" className="h-24 w-full object-cover rounded-lg border border-gray-700/60" />
                   </div>
                 )}
               </div>
-              <div className="md:col-span-2">
-                <label className="block text-gray-300 mb-1 text-sm">Imágenes complementarias</label>
+
+              {/* Herencia de Imágenes */}
+              <div>
+                <div className="flex items-center gap-2 mb-3">
+                  <RefreshCw className="h-4 w-4 text-yellow-400" />
+                  <span className="text-[11px] font-semibold text-gray-400 uppercase tracking-widest">Herencia de Imágenes</span>
+                </div>
+                <div className="bg-gray-800/50 rounded-xl border border-gray-700/50 divide-y divide-gray-700/40">
+                  {/* Opción 1: imágenes del producto base */}
+                  <label className="flex items-start gap-3 px-4 py-3.5 cursor-pointer hover:bg-gray-700/20 transition-colors rounded-t-xl">
+                    <div
+                      onClick={() => setNewVariant({ ...newVariant, use_product_images: true, use_model_images: false, image_reference_variant_id: null })}
+                      className={`flex-shrink-0 mt-0.5 w-4 h-4 rounded-full border-2 flex items-center justify-center transition-colors ${newVariant.use_product_images === true && newVariant.use_model_images !== true ? 'border-yellow-400' : 'border-gray-600'}`}
+                    >
+                      {newVariant.use_product_images === true && newVariant.use_model_images !== true && (
+                        <div className="w-2 h-2 rounded-full bg-yellow-400" />
+                      )}
+                    </div>
+                    <div className="flex-1" onClick={() => setNewVariant({ ...newVariant, use_product_images: true, use_model_images: false, image_reference_variant_id: null })}>
+                      <span className="text-sm font-medium text-gray-200">Usar imágenes del producto base</span>
+                      <p className="text-xs text-gray-500 mt-0.5">La variante usará las imágenes del producto principal</p>
+                    </div>
+                  </label>
+
+                  {/* Opción 2: imágenes propias */}
+                  <label className="flex items-start gap-3 px-4 py-3.5 cursor-pointer hover:bg-gray-700/20 transition-colors">
+                    <div
+                      onClick={() => setNewVariant({ ...newVariant, use_product_images: false, use_model_images: false, image_reference_variant_id: null })}
+                      className={`flex-shrink-0 mt-0.5 w-4 h-4 rounded-full border-2 flex items-center justify-center transition-colors ${newVariant.use_product_images !== true && newVariant.use_model_images !== true ? 'border-yellow-400' : 'border-gray-600'}`}
+                    >
+                      {newVariant.use_product_images !== true && newVariant.use_model_images !== true && (
+                        <div className="w-2 h-2 rounded-full bg-yellow-400" />
+                      )}
+                    </div>
+                    <div className="flex-1" onClick={() => setNewVariant({ ...newVariant, use_product_images: false, use_model_images: false, image_reference_variant_id: null })}>
+                      <span className="text-sm font-medium text-gray-200">Usar imágenes propias</span>
+                      <p className="text-xs text-gray-500 mt-0.5">La variante usará sus propias imágenes (subidas arriba)</p>
+                    </div>
+                  </label>
+
+                  {/* Opción 3: misma modelo automático */}
+                  <label className="flex items-start gap-3 px-4 py-3.5 cursor-pointer hover:bg-gray-700/20 transition-colors">
+                    <div
+                      onClick={() => setNewVariant({ ...newVariant, use_product_images: false, use_model_images: true, image_reference_variant_id: null })}
+                      className={`flex-shrink-0 mt-0.5 w-4 h-4 rounded-full border-2 flex items-center justify-center transition-colors ${newVariant.use_model_images === true && !newVariant.image_reference_variant_id ? 'border-yellow-400' : 'border-gray-600'}`}
+                    >
+                      {newVariant.use_model_images === true && !newVariant.image_reference_variant_id && (
+                        <div className="w-2 h-2 rounded-full bg-yellow-400" />
+                      )}
+                    </div>
+                    <div className="flex-1" onClick={() => setNewVariant({ ...newVariant, use_product_images: false, use_model_images: true, image_reference_variant_id: null })}>
+                      <span className="text-sm font-medium text-gray-200">Usar imágenes de otra variante del mismo modelo</span>
+                      <p className="text-xs text-gray-500 mt-0.5">Buscará automáticamente otra variante del mismo modelo con imágenes</p>
+                    </div>
+                  </label>
+
+                  {/* Opción 4: variante específica */}
+                  <label className="flex items-start gap-3 px-4 py-3.5 cursor-pointer hover:bg-gray-700/20 transition-colors rounded-b-xl">
+                    <div
+                      onClick={() => setNewVariant({ ...newVariant, use_product_images: false, use_model_images: true })}
+                      className={`flex-shrink-0 mt-0.5 w-4 h-4 rounded-full border-2 flex items-center justify-center transition-colors ${newVariant.use_model_images === true && !!newVariant.image_reference_variant_id ? 'border-yellow-400' : 'border-gray-600'}`}
+                    >
+                      {newVariant.use_model_images === true && !!newVariant.image_reference_variant_id && (
+                        <div className="w-2 h-2 rounded-full bg-yellow-400" />
+                      )}
+                    </div>
+                    <div className="flex-1" onClick={() => setNewVariant({ ...newVariant, use_product_images: false, use_model_images: true })}>
+                      <span className="text-sm font-medium text-gray-200">Usar imágenes de otra variante específica</span>
+                      <p className="text-xs text-gray-500 mt-0.5">Selecciona una variante específica de la que heredar imágenes</p>
+                      {newVariant.use_model_images === true && (
+                        <select
+                          value={newVariant.image_reference_variant_id || ''}
+                          onChange={(e) => setNewVariant({ ...newVariant, image_reference_variant_id: e.target.value ? Number(e.target.value) : null })}
+                          className="mt-2 w-full bg-gray-700/80 border border-gray-600/60 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-yellow-500/50"
+                        >
+                          <option value="">Seleccionar variante...</option>
+                          {(() => {
+                            const productVariants = variants[showAddVariant.productId || 0] || [];
+                            return productVariants
+                              .filter(v => (v.variant_images?.length ?? 0) > 0 || v.image)
+                              .map(v => (
+                                <option key={v.id} value={v.id}>
+                                  {v.name} {v.model ? `(${v.model})` : ''} {v.size ? `- ${v.size}` : ''}
+                                </option>
+                              ));
+                          })()}
+                        </select>
+                      )}
+                    </div>
+                  </label>
+                </div>
+              </div>
+
+              {/* Galería */}
+              <div>
+                <div className="flex items-center gap-2 mb-3">
+                  <AlertCircle className="h-4 w-4 text-yellow-400" />
+                  <span className="text-[11px] font-semibold text-gray-400 uppercase tracking-widest">Galería complementaria</span>
+                </div>
                 <input
                   type="file"
                   accept="image/*"
                   multiple
-                  className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-sm"
                   onChange={async (e) => {
                     const files = e.target.files;
                     setNewVariantGalleryFiles(files);
@@ -4465,17 +4412,21 @@ const fetchOrderDetails = async (orderId: number) => {
                       setNewVariantGalleryPreviews([]);
                     }
                   }}
+                  className="w-full bg-gray-800 border border-gray-700/60 rounded-lg px-3 py-2 text-sm text-gray-300 file:mr-3 file:py-1 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-medium file:bg-yellow-500/20 file:text-yellow-400 hover:file:bg-yellow-500/30 transition-colors cursor-pointer"
                 />
                 {newVariantGalleryPreviews.length > 0 && (
                   <div className="flex flex-wrap gap-2 mt-2">
                     {newVariantGalleryPreviews.map((preview, idx) => (
-                      <img key={idx} src={preview} alt={`Preview ${idx + 1}`} className="h-20 w-20 object-cover rounded-lg border border-gray-700" />
+                      <img key={idx} src={preview} alt={`Preview ${idx + 1}`} className="h-20 w-20 object-cover rounded-lg border border-gray-700/60" />
                     ))}
                   </div>
                 )}
               </div>
+
             </div>
-            <div className="flex justify-end space-x-2 mt-6">
+
+            {/* Footer sticky */}
+            <div className="flex-shrink-0 bg-gray-900/95 backdrop-blur-sm px-6 py-4 border-t border-gray-700/50 flex justify-end gap-3 rounded-b-2xl">
               <button
                 onClick={() => {
                   setShowAddVariant({ show: false, productId: null });
@@ -4484,158 +4435,236 @@ const fetchOrderDetails = async (orderId: number) => {
                   setNewVariantGalleryPreviews([]);
                   setNewVariant({ sku: '', name: '', price: 0, original_price: undefined, model: '', size: '', stock: 0, metal_type: null, carat: undefined, imageFile: null, is_active: true, is_default: false, use_product_images: true, use_model_images: false, image_reference_variant_id: null });
                 }}
-                className="px-4 py-2 bg-gray-600 hover:bg-gray-700 rounded text-sm"
+                className="px-4 py-2 bg-gray-700/60 hover:bg-gray-700 text-gray-300 hover:text-white rounded-lg text-sm font-medium transition-colors"
               >
                 Cancelar
               </button>
               <button
                 onClick={handleAddVariant}
-                className="px-4 py-2 bg-yellow-500 hover:bg-yellow-600 text-black rounded"
+                className="flex items-center gap-2 px-5 py-2 bg-yellow-500 hover:bg-yellow-400 text-black rounded-lg text-sm font-bold transition-colors"
               >
+                <Plus className="h-4 w-4" />
                 Agregar Variante
               </button>
             </div>
+
           </div>
         </div>
       )}
 
       {/* Modal para editar variante */}
       {editingVariant && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-gray-800 rounded-lg p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between mb-3 sm:mb-4">
-              <h3 className="text-base sm:text-lg font-bold">Editar Variante</h3>
-              {!editingVariant.is_default && (
-                <label className="flex items-center cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={editingVariant.is_active ?? true}
-                    onChange={(e) => setEditingVariant({ ...editingVariant, is_active: e.target.checked })}
-                    className="sr-only"
-                  />
-                  <div className={`relative inline-block w-14 h-8 rounded-full ${editingVariant.is_active ?? true ? 'bg-green-500' : 'bg-gray-300'}`}>
-                    <div className={`absolute left-1 top-1 bg-white w-6 h-6 rounded-full transition-transform duration-200 ${editingVariant.is_active ?? true ? 'transform translate-x-6' : ''}`} />
-                  </div>
-                  <span className="ml-2 text-gray-300 text-sm">Activo</span>
-                </label>
-              )}
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-gray-900 rounded-2xl w-full max-w-2xl max-h-[92vh] flex flex-col border border-gray-700/60 shadow-2xl">
+
+            {/* Header sticky */}
+            <div className="flex-shrink-0 bg-gray-900/95 backdrop-blur-sm px-6 py-4 border-b border-gray-700/50 flex justify-between items-center rounded-t-2xl">
+              <div>
+                <h3 className="text-lg font-bold text-white">Editar Variante</h3>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  {editingVariant.model ? `Modelo: ${editingVariant.model}` : 'Variante principal'}
+                  {editingVariant.size ? ` · Talla: ${editingVariant.size}` : ''}
+                </p>
+              </div>
+              <div className="flex items-center gap-3">
+                {!editingVariant.is_default && (
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <div className="relative">
+                      <input
+                        type="checkbox"
+                        checked={editingVariant.is_active ?? true}
+                        onChange={(e) => setEditingVariant({ ...editingVariant, is_active: e.target.checked })}
+                        className="sr-only"
+                      />
+                      <div className={`block w-12 h-6 rounded-full transition-colors ${editingVariant.is_active ?? true ? 'bg-green-500' : 'bg-gray-600'}`} />
+                      <div className={`absolute left-0.5 top-0.5 bg-white w-5 h-5 rounded-full shadow transition-transform duration-200 ${editingVariant.is_active ?? true ? 'translate-x-6' : ''}`} />
+                    </div>
+                    <span className={`text-sm font-medium ${editingVariant.is_active ?? true ? 'text-green-400' : 'text-gray-500'}`}>
+                      {editingVariant.is_active ?? true ? 'Activo' : 'Inactivo'}
+                    </span>
+                  </label>
+                )}
+                <button
+                  onClick={() => {
+                    setEditingVariant(null);
+                    setEditingVariantImageFile(null);
+                    setEditingVariantImagePreview(null);
+                    setEditingVariantGalleryFiles(null);
+                    setEditingVariantGalleryPreviews([]);
+                    setVariantImagesToDelete([]);
+                  }}
+                  className="p-1.5 rounded-lg text-gray-500 hover:text-white hover:bg-gray-700 transition-all cursor-pointer"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
+
+            {/* Scrollable content */}
+            <div className="flex-1 overflow-y-auto p-6 space-y-6">
+
+              {/* Identificación */}
               <div>
-                <label className="block text-gray-300 mb-1">SKU</label>
-                <input
-                  type="text"
-                  value={editingVariant.sku ?? ''}
-                  onChange={(e) => setEditingVariant({ ...editingVariant, sku: e.target.value })}
-                  className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
-                  placeholder="Ej: VAR-001"
-                  readOnly={!!editingVariant.is_default}
-                />
-              </div>
-              <div>
-                <label className="block text-gray-300 mb-1">Nombre</label>
-                <input
-                  type="text"
-                  value={editingVariant.name}
-                  onChange={(e) => setEditingVariant({ ...editingVariant, name: e.target.value })}
-                  className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
-                  readOnly={!!editingVariant.is_default}
-                />
-              </div>
-              <div>
-                <div>
-                  <label className="block text-gray-300 mb-1">Precio</label>
-                  <input
-                    type="number"
-                    value={editingVariant.price}
-                    onChange={(e) => setEditingVariant({ ...editingVariant, price: parseFloat(e.target.value) || 0 })}
-                    className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
-                  />
+                <div className="flex items-center gap-2 mb-3">
+                  <Tag className="h-3.5 w-3.5 text-yellow-400" />
+                  <span className="text-xs font-semibold text-yellow-400 uppercase tracking-widest">Identificación</span>
                 </div>
-                <div>
-                  <label className="block text-gray-300 mb-1">Precio Original</label>
-                  <input
-                    type="number"
-                    value={editingVariant.original_price || ''}
-                    onChange={(e) => setEditingVariant({ ...editingVariant, original_price: e.target.value ? parseFloat(e.target.value) : undefined })}
-                    className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
-                    placeholder="0.00"
-                  />
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs text-gray-400 mb-1.5">SKU</label>
+                    <input
+                      type="text"
+                      value={editingVariant.sku ?? ''}
+                      onChange={(e) => setEditingVariant({ ...editingVariant, sku: e.target.value })}
+                      className={`w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-yellow-400/50 transition-colors ${editingVariant.is_default ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      placeholder="Ej: VAR-001"
+                      readOnly={!!editingVariant.is_default}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-400 mb-1.5">Nombre</label>
+                    <input
+                      type="text"
+                      value={editingVariant.name}
+                      onChange={(e) => setEditingVariant({ ...editingVariant, name: e.target.value })}
+                      className={`w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-yellow-400/50 transition-colors ${editingVariant.is_default ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      readOnly={!!editingVariant.is_default}
+                    />
+                  </div>
                 </div>
               </div>
+
+              <div className="border-t border-gray-700/50" />
+
+              {/* Precios y Stock */}
               <div>
-                <div>
-                  <label className="block text-gray-300 mb-1">Modelo</label>
-                  <input
-                    type="text"
-                    value={editingVariant.model || ''}
-                    onChange={(e) => setEditingVariant({ ...editingVariant, model: e.target.value })}
-                    className={`w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 ${editingVariant.is_default ? 'cursor-not-allowed opacity-75' : ''}`}
-                    readOnly={!!editingVariant.is_default}
-                  />
+                <div className="flex items-center gap-2 mb-3">
+                  <DollarSign className="h-3.5 w-3.5 text-yellow-400" />
+                  <span className="text-xs font-semibold text-yellow-400 uppercase tracking-widest">Precios y Stock</span>
                 </div>
-                <div>
-                  <label className="block text-gray-300 mb-1">Talla</label>
-                  <input
-                    type="text"
-                    value={editingVariant.size || ''}
-                    onChange={(e) => setEditingVariant({ ...editingVariant, size: e.target.value })}
-                    className={`w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 ${editingVariant.is_default ? 'cursor-not-allowed opacity-75' : ''}`}
-                    readOnly={!!editingVariant.is_default}
-                  />
+                <div className="grid grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-xs text-gray-400 mb-1.5">Precio</label>
+                    <input
+                      type="number"
+                      value={editingVariant.price}
+                      onChange={(e) => setEditingVariant({ ...editingVariant, price: parseFloat(e.target.value) || 0 })}
+                      className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-yellow-400/50 transition-colors"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-400 mb-1.5">Precio Original</label>
+                    <input
+                      type="number"
+                      value={editingVariant.original_price || ''}
+                      onChange={(e) => setEditingVariant({ ...editingVariant, original_price: e.target.value ? parseFloat(e.target.value) : undefined })}
+                      className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-yellow-400/50 transition-colors"
+                      placeholder="0.00"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-400 mb-1.5">Stock</label>
+                    <input
+                      type="number"
+                      value={editingVariant.stock || 0}
+                      onChange={(e) => setEditingVariant({ ...editingVariant, stock: parseInt(e.target.value) || 0 })}
+                      className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-yellow-400/50 transition-colors"
+                      placeholder="0"
+                    />
+                  </div>
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-gray-300 mb-1">Metal / tipo</label>
-                  <select
-                    value={editingVariant.metal_type ?? ''}
-                    onChange={(e) => setEditingVariant({ ...editingVariant, metal_type: e.target.value ? Number(e.target.value) : null })}
-                    className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
-                  >
-                    <option value="">Ninguno</option>
-                    {(metalTypesList.length ? metalTypesList : metalTypes || []).map((mt: { id: number; name: string }) => (
-                      <option key={mt.id} value={mt.id}>{mt.name}</option>
-                    ))}
-                  </select>
+
+              <div className="border-t border-gray-700/50" />
+
+              {/* Clasificación */}
+              <div>
+                <div className="flex items-center gap-2 mb-3">
+                  <Package className="h-3.5 w-3.5 text-yellow-400" />
+                  <span className="text-xs font-semibold text-yellow-400 uppercase tracking-widest">Clasificación</span>
                 </div>
-                <div>
-                  <label className="block text-gray-300 mb-1">Quilates (k)</label>
-                  <input
-                    type="number"
-                    min={0}
-                    step={0.5}
-                    value={editingVariant.carat ?? ''}
-                    onChange={(e) => setEditingVariant({ ...editingVariant, carat: e.target.value ? parseFloat(e.target.value) : null })}
-                    className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
-                    placeholder="Ej: 14"
-                  />
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs text-gray-400 mb-1.5">Modelo</label>
+                    <input
+                      type="text"
+                      value={editingVariant.model || ''}
+                      onChange={(e) => setEditingVariant({ ...editingVariant, model: e.target.value })}
+                      className={`w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-yellow-400/50 transition-colors ${editingVariant.is_default ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      readOnly={!!editingVariant.is_default}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-400 mb-1.5">Talla</label>
+                    <input
+                      type="text"
+                      value={editingVariant.size || ''}
+                      onChange={(e) => setEditingVariant({ ...editingVariant, size: e.target.value })}
+                      className={`w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-yellow-400/50 transition-colors ${editingVariant.is_default ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      readOnly={!!editingVariant.is_default}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-400 mb-1.5">Metal / Tipo</label>
+                    <select
+                      value={editingVariant.metal_type ?? ''}
+                      onChange={(e) => setEditingVariant({ ...editingVariant, metal_type: e.target.value ? Number(e.target.value) : null })}
+                      className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-yellow-400/50 transition-colors cursor-pointer"
+                    >
+                      <option value="">Ninguno</option>
+                      {(metalTypesList.length ? metalTypesList : metalTypes || []).map((mt: { id: number; name: string }) => (
+                        <option key={mt.id} value={mt.id}>{mt.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-400 mb-1.5">Quilates (k)</label>
+                    <input
+                      type="number"
+                      min={0}
+                      step={0.5}
+                      value={editingVariant.carat ?? ''}
+                      onChange={(e) => setEditingVariant({ ...editingVariant, carat: e.target.value ? parseFloat(e.target.value) : null })}
+                      className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-yellow-400/50 transition-colors"
+                      placeholder="Ej: 14"
+                    />
+                  </div>
                 </div>
               </div>
+
+              <div className="border-t border-gray-700/50" />
+
+              {/* Imagen principal */}
               <div>
-                <label className="block text-gray-300 mb-1">Stock</label>
-                <input
-                  type="number"
-                  value={editingVariant.stock || 0}
-                  onChange={(e) => setEditingVariant({ ...editingVariant, stock: parseInt(e.target.value) || 0 })}
-                  className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2"
-                  placeholder="0"
-                />
-              </div>
-              <div>
-                <label className="block text-gray-300 mb-1">Imagen Principal</label>
-                <div className="space-y-2">
-                  {editingVariant.image && (
-                    isVideoUrl(editingVariant.image) ? (
-                      <video src={buildMediaUrl(editingVariant.image)} className="h-24 w-full object-cover rounded-lg" controls />
-                    ) : (
-                      <img src={buildMediaUrl(editingVariant.image)} alt={editingVariant.name} className="h-24 w-full object-cover rounded-lg" />
-                    )
+                <div className="flex items-center gap-2 mb-3">
+                  <Image className="h-3.5 w-3.5 text-yellow-400" />
+                  <span className="text-xs font-semibold text-yellow-400 uppercase tracking-widest">Imagen Principal</span>
+                </div>
+                <div className="space-y-3">
+                  {(editingVariant.image || editingVariantImagePreview) && (
+                    <div className="flex gap-3">
+                      {editingVariant.image && !editingVariantImagePreview && (
+                        <div className="relative">
+                          <span className="absolute -top-1.5 -left-1.5 text-[9px] bg-gray-700 text-gray-400 px-1.5 py-0.5 rounded font-medium z-10">Actual</span>
+                          {isVideoUrl(editingVariant.image) ? (
+                            <video src={buildMediaUrl(editingVariant.image)} className="h-24 w-24 object-cover rounded-lg border border-gray-700" muted playsInline />
+                          ) : (
+                            <img src={buildMediaUrl(editingVariant.image)} alt={editingVariant.name} className="h-24 w-24 object-cover rounded-lg border border-gray-700" />
+                          )}
+                        </div>
+                      )}
+                      {editingVariantImagePreview && (
+                        <div className="relative">
+                          <span className="absolute -top-1.5 -left-1.5 text-[9px] bg-yellow-500/20 text-yellow-400 border border-yellow-500/30 px-1.5 py-0.5 rounded font-medium z-10">Nueva</span>
+                          <img src={editingVariantImagePreview} alt="Preview" className="h-24 w-24 object-cover rounded-lg border border-yellow-500/30" />
+                        </div>
+                      )}
+                    </div>
                   )}
                   <input
                     type="file"
                     accept="image/*"
-                    className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-sm"
+                    className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-400 file:mr-3 file:py-1 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-medium file:bg-yellow-500/20 file:text-yellow-400 hover:file:bg-yellow-500/30 cursor-pointer"
                     onChange={async (e) => {
                       const file = e.target.files && e.target.files[0] ? e.target.files[0] : null;
                       setEditingVariantImageFile(file);
@@ -4647,104 +4676,57 @@ const fetchOrderDetails = async (orderId: number) => {
                       }
                     }}
                   />
-                  {editingVariantImagePreview && (
-                    <div className="mt-2">
-                      <img src={editingVariantImagePreview} alt="Preview" className="h-24 w-full object-cover rounded-lg border border-gray-700" />
-                </div>
-                  )}
                 </div>
               </div>
+
+              <div className="border-t border-gray-700/50" />
+
               {/* Configuración de herencia de imágenes */}
-              <div className="md:col-span-2">
-                <label className="block text-gray-300 mb-2 text-sm font-medium">Configuración de Imágenes</label>
-                <div className="bg-gray-700/50 rounded-lg p-4 space-y-3">
-                  <div>
-                    <label className="flex items-start cursor-pointer">
-                      <input
-                        type="radio"
-                        name="imageMode"
-                        checked={editingVariant.use_product_images === true && editingVariant.use_model_images !== true}
-                        onChange={() => setEditingVariant({ 
-                          ...editingVariant, 
-                          use_product_images: true, 
-                          use_model_images: false,
-                          image_reference_variant_id: null
-                        })}
-                        className="mt-1 mr-2"
-                      />
-                      <div className="flex-1">
-                        <span className="text-sm font-medium text-gray-200">Usar imágenes del producto base</span>
-                        <p className="text-xs text-gray-400 mt-0.5">La variante usará las imágenes del producto principal</p>
+              <div>
+                <div className="flex items-center gap-2 mb-3">
+                  <RefreshCw className="h-3.5 w-3.5 text-yellow-400" />
+                  <span className="text-xs font-semibold text-yellow-400 uppercase tracking-widest">Herencia de Imágenes</span>
+                </div>
+                <div className="bg-gray-800/50 rounded-xl border border-gray-700/50 p-4 space-y-3">
+                  {[
+                    {
+                      checked: editingVariant.use_product_images === true && editingVariant.use_model_images !== true,
+                      onChange: () => setEditingVariant({ ...editingVariant, use_product_images: true, use_model_images: false, image_reference_variant_id: null }),
+                      label: 'Usar imágenes del producto base',
+                      desc: 'La variante usará las imágenes del producto principal'
+                    },
+                    {
+                      checked: editingVariant.use_product_images !== true && editingVariant.use_model_images !== true,
+                      onChange: () => setEditingVariant({ ...editingVariant, use_product_images: false, use_model_images: false, image_reference_variant_id: null }),
+                      label: 'Usar imágenes propias',
+                      desc: 'La variante usará sus propias imágenes (subidas arriba)'
+                    },
+                    {
+                      checked: editingVariant.use_model_images === true && !editingVariant.image_reference_variant_id,
+                      onChange: () => setEditingVariant({ ...editingVariant, use_product_images: false, use_model_images: true, image_reference_variant_id: null }),
+                      label: 'Usar imágenes de otra variante del mismo modelo',
+                      desc: 'Buscará automáticamente otra variante del mismo modelo con imágenes'
+                    },
+                    {
+                      checked: editingVariant.use_model_images === true && !!editingVariant.image_reference_variant_id,
+                      onChange: () => setEditingVariant({ ...editingVariant, use_product_images: false, use_model_images: true }),
+                      label: 'Usar imágenes de una variante específica',
+                      desc: 'Selecciona una variante específica de la que heredar imágenes'
+                    },
+                  ].map(({ checked, onChange, label, desc }, i) => (
+                    <label key={i} className="flex items-start gap-3 cursor-pointer group/radio">
+                      <div className={`mt-0.5 w-4 h-4 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-colors ${checked ? 'border-yellow-400' : 'border-gray-600 group-hover/radio:border-gray-400'}`}>
+                        {checked && <div className="w-1.5 h-1.5 rounded-full bg-yellow-400" />}
                       </div>
-                    </label>
-                  </div>
-                  
-                  <div>
-                    <label className="flex items-start cursor-pointer">
-                      <input
-                        type="radio"
-                        name="imageMode"
-                        checked={editingVariant.use_product_images !== true && editingVariant.use_model_images !== true}
-                        onChange={() => setEditingVariant({ 
-                          ...editingVariant, 
-                          use_product_images: false, 
-                          use_model_images: false,
-                          image_reference_variant_id: null
-                        })}
-                        className="mt-1 mr-2"
-                      />
-                      <div className="flex-1">
-                        <span className="text-sm font-medium text-gray-200">Usar imágenes propias</span>
-                        <p className="text-xs text-gray-400 mt-0.5">La variante usará sus propias imágenes (subidas arriba)</p>
-                      </div>
-                    </label>
-                  </div>
-                  
-                  <div>
-                    <label className="flex items-start cursor-pointer">
-                      <input
-                        type="radio"
-                        name="imageMode"
-                        checked={editingVariant.use_model_images === true && !editingVariant.image_reference_variant_id}
-                        onChange={() => setEditingVariant({ 
-                          ...editingVariant, 
-                          use_product_images: false, 
-                          use_model_images: true,
-                          image_reference_variant_id: null
-                        })}
-                        className="mt-1 mr-2"
-                      />
-                      <div className="flex-1">
-                        <span className="text-sm font-medium text-gray-200">Usar imágenes de otra variante del mismo modelo</span>
-                        <p className="text-xs text-gray-400 mt-0.5">Buscará automáticamente otra variante del mismo modelo con imágenes</p>
-                      </div>
-                    </label>
-                  </div>
-                  
-                  <div>
-                    <label className="flex items-start cursor-pointer">
-                      <input
-                        type="radio"
-                        name="imageMode"
-                        checked={editingVariant.use_model_images === true && !!editingVariant.image_reference_variant_id}
-                        onChange={() => setEditingVariant({ 
-                          ...editingVariant, 
-                          use_product_images: false, 
-                          use_model_images: true
-                        })}
-                        className="mt-1 mr-2"
-                      />
-                      <div className="flex-1">
-                        <span className="text-sm font-medium text-gray-200">Usar imágenes de otra variante específica</span>
-                        <p className="text-xs text-gray-400 mt-0.5">Selecciona una variante específica de la que heredar imágenes</p>
-                        {editingVariant.use_model_images === true && !!editingVariant.image_reference_variant_id && (
+                      <input type="radio" name="imageMode" checked={checked} onChange={onChange} className="sr-only" />
+                      <div className="flex-1 min-w-0">
+                        <span className="text-sm font-medium text-gray-200">{label}</span>
+                        <p className="text-xs text-gray-500 mt-0.5">{desc}</p>
+                        {i === 3 && editingVariant.use_model_images === true && !!editingVariant.image_reference_variant_id && (
                           <select
                             value={editingVariant.image_reference_variant_id || ''}
-                            onChange={(e) => setEditingVariant({ 
-                              ...editingVariant, 
-                              image_reference_variant_id: e.target.value ? Number(e.target.value) : null
-                            })}
-                            className="mt-2 w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-sm text-white"
+                            onChange={(e) => setEditingVariant({ ...editingVariant, image_reference_variant_id: e.target.value ? Number(e.target.value) : null })}
+                            className="mt-2 w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-yellow-400/50 cursor-pointer"
                           >
                             <option value="">Seleccionar variante...</option>
                             {(() => {
@@ -4761,63 +4743,78 @@ const fetchOrderDetails = async (orderId: number) => {
                         )}
                       </div>
                     </label>
-                  </div>
+                  ))}
                 </div>
               </div>
-              <div className="md:col-span-2 space-y-2">
-                <label className="block text-gray-300 mb-1">Imágenes complementarias</label>
-                <div className="flex flex-wrap gap-3">
+
+              <div className="border-t border-gray-700/50" />
+
+              {/* Galería complementaria */}
+              <div>
+                <div className="flex items-center gap-2 mb-3">
+                  <AlertCircle className="h-3.5 w-3.5 text-yellow-400" />
+                  <span className="text-xs font-semibold text-yellow-400 uppercase tracking-widest">Galería Complementaria</span>
+                </div>
+                <div className="space-y-3">
                   {editingVariant?.variant_images && editingVariant.variant_images.length > 0 ? (
-                    editingVariant.variant_images.map(image => {
-                      const isMarkedForDelete = variantImagesToDelete.includes(image.id);
-                      return (
-                        <div key={image.id} className={`relative ${isMarkedForDelete ? 'opacity-50' : ''}`}>
-                        {isVideoUrl(image.url) ? (
-                          <video src={buildMediaUrl(image.url)} className="h-20 w-20 object-cover rounded-lg border border-gray-700" muted playsInline />
-                        ) : (
-                          <img src={buildMediaUrl(image.url)} alt={editingVariant.name} className="h-20 w-20 object-cover rounded-lg border border-gray-700" />
-                        )}
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteVariantImage(image.id)}
-                            className={`absolute -top-2 -right-2 rounded-full h-5 w-5 text-xs ${isMarkedForDelete ? 'bg-gray-600 text-gray-300' : 'bg-red-600 text-white'}`}
-                            title={isMarkedForDelete ? 'Marcada para eliminar' : 'Eliminar'}
-                        >
-                            {isMarkedForDelete ? '↩' : '×'}
-                        </button>
-                      </div>
-                      );
-                    })
+                    <div className="flex flex-wrap gap-2">
+                      {editingVariant.variant_images.map(image => {
+                        const isMarkedForDelete = variantImagesToDelete.includes(image.id);
+                        return (
+                          <div key={image.id} className={`relative transition-opacity ${isMarkedForDelete ? 'opacity-40' : ''}`}>
+                            {isVideoUrl(image.url) ? (
+                              <video src={buildMediaUrl(image.url)} className="h-20 w-20 object-cover rounded-lg border border-gray-700" muted playsInline />
+                            ) : (
+                              <img src={buildMediaUrl(image.url)} alt={editingVariant.name} className="h-20 w-20 object-cover rounded-lg border border-gray-700" />
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteVariantImage(image.id)}
+                              className={`absolute -top-1.5 -right-1.5 rounded-full h-5 w-5 flex items-center justify-center text-xs font-bold transition-colors cursor-pointer ${isMarkedForDelete ? 'bg-gray-600 text-gray-300 hover:bg-gray-500' : 'bg-red-600 text-white hover:bg-red-500'}`}
+                              title={isMarkedForDelete ? 'Desmarcar' : 'Eliminar'}
+                            >
+                              {isMarkedForDelete ? '↩' : '×'}
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
                   ) : (
-                    <p className="text-gray-500 text-sm">Sin imágenes adicionales</p>
+                    <p className="text-xs text-gray-600 italic">Sin imágenes adicionales</p>
+                  )}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-400 file:mr-3 file:py-1 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-medium file:bg-yellow-500/20 file:text-yellow-400 hover:file:bg-yellow-500/30 cursor-pointer"
+                    onChange={async (e) => {
+                      const files = e.target.files;
+                      setEditingVariantGalleryFiles(files);
+                      if (files) {
+                        const previews = await Promise.all(Array.from(files).map(createImagePreview));
+                        setEditingVariantGalleryPreviews(previews);
+                      } else {
+                        setEditingVariantGalleryPreviews([]);
+                      }
+                    }}
+                  />
+                  {editingVariantGalleryPreviews.length > 0 && (
+                    <div className="flex flex-wrap gap-2">
+                      {editingVariantGalleryPreviews.map((preview, idx) => (
+                        <div key={idx} className="relative">
+                          <span className="absolute -top-1.5 -left-1.5 text-[9px] bg-yellow-500/20 text-yellow-400 border border-yellow-500/30 px-1.5 py-0.5 rounded font-medium z-10">Nueva</span>
+                          <img src={preview} alt={`Preview ${idx + 1}`} className="h-20 w-20 object-cover rounded-lg border border-yellow-500/30" />
+                        </div>
+                      ))}
+                    </div>
                   )}
                 </div>
-                <input
-                  type="file"
-                  accept="image/*"
-                  multiple
-                  className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-sm"
-                  onChange={async (e) => {
-                    const files = e.target.files;
-                    setEditingVariantGalleryFiles(files);
-                    if (files) {
-                      const previews = await Promise.all(Array.from(files).map(createImagePreview));
-                      setEditingVariantGalleryPreviews(previews);
-                    } else {
-                      setEditingVariantGalleryPreviews([]);
-                    }
-                  }}
-                />
-                {editingVariantGalleryPreviews.length > 0 && (
-                  <div className="flex flex-wrap gap-2 mt-2">
-                    {editingVariantGalleryPreviews.map((preview, idx) => (
-                      <img key={idx} src={preview} alt={`Preview ${idx + 1}`} className="h-20 w-20 object-cover rounded-lg border border-gray-700" />
-                    ))}
-                  </div>
-                )}
               </div>
+
             </div>
-            <div className="flex justify-end space-x-2 mt-6">
+
+            {/* Footer sticky */}
+            <div className="flex-shrink-0 bg-gray-900/95 backdrop-blur-sm px-6 py-4 border-t border-gray-700/50 flex justify-end gap-3 rounded-b-2xl">
               <button
                 onClick={() => {
                   setEditingVariant(null);
@@ -4827,17 +4824,19 @@ const fetchOrderDetails = async (orderId: number) => {
                   setEditingVariantGalleryPreviews([]);
                   setVariantImagesToDelete([]);
                 }}
-                className="px-4 py-2 bg-gray-600 hover:bg-gray-700 rounded text-sm"
+                className="px-4 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-xl text-sm text-gray-300 hover:text-white transition-all cursor-pointer"
               >
                 Cancelar
               </button>
               <button
                 onClick={handleEditVariant}
-                className="px-4 py-2 bg-yellow-500 hover:bg-yellow-600 text-black rounded"
+                className="px-5 py-2 bg-yellow-500 hover:bg-yellow-400 text-black font-semibold rounded-xl text-sm transition-all cursor-pointer flex items-center gap-2"
               >
+                <Save className="h-3.5 w-3.5" />
                 Guardar Cambios
               </button>
             </div>
+
           </div>
         </div>
       )}
@@ -5000,135 +4999,330 @@ const fetchOrderDetails = async (orderId: number) => {
 
       {/* Modal para detalles de orden */}
       {showOrderDetails.show && orderDetails && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-gray-800 rounded-lg p-6 w-full max-w-4xl max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between mb-6">
-              <h3 className="text-xl font-bold text-white">Detalles de la Orden #{orderDetails.order_number || orderDetails.order_id}</h3>
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-gray-900 rounded-2xl w-full max-w-4xl max-h-[92vh] flex flex-col border border-gray-700/60 shadow-2xl">
+
+            {/* Header sticky */}
+            <div className="flex-shrink-0 bg-gray-900/95 backdrop-blur-sm px-6 py-4 border-b border-gray-700/50 flex items-start justify-between gap-4 rounded-t-2xl">
+              <div>
+                <div className="flex items-center gap-3 flex-wrap">
+                  <h3 className="text-xl font-bold text-white">
+                    Orden #{orderDetails.order_number || orderDetails.order_id}
+                  </h3>
+                  <span className={`text-xs font-bold px-2.5 py-1 rounded-full border ${
+                    orderDetails.status === 'pagado'    ? 'bg-green-500/15 text-green-400 border-green-500/30' :
+                    orderDetails.status === 'enviado'   ? 'bg-blue-500/15 text-blue-400 border-blue-500/30' :
+                    orderDetails.status === 'entregado' ? 'bg-purple-500/15 text-purple-400 border-purple-500/30' :
+                    orderDetails.status === 'cancelado' ? 'bg-red-500/15 text-red-400 border-red-500/30' :
+                    orderDetails.status === 'pendiente' ? 'bg-yellow-500/15 text-yellow-400 border-yellow-500/30' :
+                    'bg-gray-700/60 text-gray-400 border-gray-600/40'
+                  }`}>
+                    {orderDetails.status ? orderDetails.status.charAt(0).toUpperCase() + orderDetails.status.slice(1) : '—'}
+                  </span>
+                </div>
+                <p className="text-xs text-gray-500 mt-1">
+                  {new Date(orderDetails.created_at).toLocaleDateString('es-MX', { day: '2-digit', month: 'long', year: 'numeric' })}
+                  {' · Total: '}
+                  <span className="text-yellow-400 font-semibold">${orderDetails.total?.toFixed(2)}</span>
+                </p>
+              </div>
               <button
-                onClick={() => setShowOrderDetails({ show: false, orderId: null })}
-                className="text-gray-400 hover:text-white"
+                onClick={() => {
+                  setShowOrderDetails({ show: false, orderId: null });
+                  setCancelGuideState('idle');
+                  setCancelGuideMotivo('');
+                  setCancelGuideError('');
+                }}
+                className="flex-shrink-0 p-1.5 rounded-lg text-gray-500 hover:text-white hover:bg-gray-700 transition-all cursor-pointer"
               >
-                <X className="h-6 w-6" />
+                <X className="h-5 w-5" />
               </button>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {/* Información de la orden */}
-              <div className="space-y-4">
-                <h4 className="text-lg font-semibold text-white mb-3">Información de la Orden</h4>
-                <div className="bg-gray-700 rounded-lg p-4 space-y-2">
-                  <div className="flex justify-between">
-                    <span className="text-gray-300">Estado:</span>
-                    <span className="text-white font-medium capitalize">{orderDetails.status ? orderDetails.status.charAt(0).toUpperCase() + orderDetails.status.slice(1).toLowerCase() : orderDetails.status}</span>
+            {/* Scrollable content */}
+            <div className="flex-1 overflow-y-auto p-6 space-y-6">
+
+              {/* Grid: Resumen + Dirección */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+                {/* Resumen de orden */}
+                <div>
+                  <div className="flex items-center gap-2 mb-3">
+                    <Package className="h-3.5 w-3.5 text-yellow-400" />
+                    <span className="text-xs font-semibold text-yellow-400 uppercase tracking-widest">Resumen</span>
                   </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-300">Total:</span>
-                    <span className="text-white font-medium">${orderDetails.total.toFixed(2)}</span>
+                  <div className="bg-gray-800/50 rounded-xl border border-gray-700/50 divide-y divide-gray-700/40">
+                    {([
+                      { label: 'Estado', value: orderDetails.status ? orderDetails.status.charAt(0).toUpperCase() + orderDetails.status.slice(1) : '—' },
+                      { label: 'Total', value: `$${orderDetails.total?.toFixed(2)}` },
+                      { label: 'Paquetería', value: orderDetails.courier_name || 'Sin asignar' },
+                      { label: 'Rastreo', value: orderDetails.tracking_code || '—' },
+                      { label: 'Fecha', value: new Date(orderDetails.created_at).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }) },
+                    ] as { label: string; value: string }[]).map(({ label, value }) => (
+                      <div key={label} className="flex justify-between items-center px-4 py-2.5">
+                        <span className="text-xs text-gray-500 flex-shrink-0">{label}</span>
+                        <span className="text-sm text-white font-medium text-right ml-4 truncate max-w-[60%]">{value}</span>
+                      </div>
+                    ))}
                   </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-300">Código de Rastreo:</span>
-                    <span className="text-white font-medium">{orderDetails.tracking_code || 'Sin código'}</span>
+                </div>
+
+                {/* Dirección de envío */}
+                <div>
+                  <div className="flex items-center gap-2 mb-3">
+                    <MapPin className="h-3.5 w-3.5 text-yellow-400" />
+                    <span className="text-xs font-semibold text-yellow-400 uppercase tracking-widest">Dirección de Envío</span>
                   </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-300">Paquetería:</span>
-                    <span className="text-white font-medium">{orderDetails.courier_name || 'Sin paquetería'}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-300">Fecha de Creación:</span>
-                    <span className="text-white font-medium">
-                      {new Date(orderDetails.created_at).toLocaleDateString('es-ES')}
-                    </span>
+                  <div className="bg-gray-800/50 rounded-xl border border-gray-700/50 px-4 py-3.5 h-[calc(100%-2rem)]">
+                    {shippingInfo ? (
+                      <div className="space-y-0.5">
+                        {shippingInfo.label && (
+                          <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1.5">{shippingInfo.label}</p>
+                        )}
+                        <p className="text-sm font-semibold text-white">{shippingInfo.name || ''}</p>
+                        <p className="text-sm text-gray-300">{shippingInfo.address_line1}</p>
+                        {shippingInfo.address_line2 && (
+                          <p className="text-sm text-gray-400">
+                            {shippingInfo.address_line2}
+                            {shippingInfo.exterior_number ? ` #${shippingInfo.exterior_number}` : ''}
+                            {shippingInfo.interior_number ? ` Int. ${shippingInfo.interior_number}` : ''}
+                          </p>
+                        )}
+                        <p className="text-sm text-gray-300">
+                          {shippingInfo.city}{shippingInfo.state ? `, ${shippingInfo.state}` : ''} {shippingInfo.postal_code || ''}
+                        </p>
+                        <p className="text-xs text-gray-500 pt-1">
+                          {shippingInfo.country || 'MX'}{shippingInfo.phone ? ` · ${shippingInfo.phone}` : ''}
+                        </p>
+                      </div>
+                    ) : (
+                      <p className="text-sm text-gray-500 italic">Sin dirección registrada</p>
+                    )}
                   </div>
                 </div>
               </div>
 
-              {/* Dirección de envío */}
-              <div className="space-y-4">
-                <h4 className="text-lg font-semibold text-white mb-3">Dirección de Envío</h4>
-                <div className="bg-gray-700 rounded-lg p-4 space-y-2">
-                  <div className="flex items-start space-x-2">
-                    <MapPin className="h-5 w-5 text-yellow-400 mt-1" />
-                    <div>
-                      {shippingInfo ? (
-                        <>
-                          <p className="text-white font-medium">{shippingInfo.label || 'Dirección'}</p>
-                          <p className="text-gray-300 text-sm">{shippingInfo.name || ''}</p>
-                          <p className="text-gray-300 text-sm">{shippingInfo.address_line1}</p>
-                          {shippingInfo.address_line2 && (
-                            <p className="text-gray-400 text-sm">{shippingInfo.address_line2}</p>
-                          )}
-                          <p className="text-gray-300 text-sm">
-                            {shippingInfo.city}{shippingInfo.state ? `, ${shippingInfo.state}` : ''} {shippingInfo.postal_code || ''}
-                          </p>
-                          <p className="text-gray-500 text-xs">
-                            {(shippingInfo.country || 'MX')} {shippingInfo.phone ? `· ${shippingInfo.phone}` : ''}
-                          </p>
-                        </>
-                      ) : (
-                        <p className="text-gray-400 text-sm">Sin dirección registrada</p>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
+              <div className="border-t border-gray-700/50" />
 
-            {/* Productos de la orden */}
-            <div className="mt-6">
-              <h4 className="text-lg font-semibold text-white mb-3">Productos de la Orden</h4>
-              <div className="bg-gray-700 rounded-lg p-4 space-y-3">
-                {orderDetailItems.map((it) => (
-                  <div key={it.id} className="flex items-center justify-between">
-                    <div className="flex items-center space-x-3">
+              {/* Productos */}
+              <div>
+                <div className="flex items-center gap-2 mb-3">
+                  <Tag className="h-3.5 w-3.5 text-yellow-400" />
+                  <span className="text-xs font-semibold text-yellow-400 uppercase tracking-widest">
+                    Productos <span className="normal-case text-gray-500 font-normal">({orderDetailItems.length})</span>
+                  </span>
+                </div>
+                <div className="space-y-2">
+                  {orderDetailItems.map((it) => (
+                    <div key={it.id} className="flex items-center gap-3 bg-gray-800/40 rounded-xl px-4 py-3 border border-gray-700/30">
                       {it.product?.image && (
                         isVideoUrl(it.product.image) ? (
-                          <video src={buildMediaUrl(it.product.image)} className="h-10 w-10 rounded object-cover" muted playsInline />
+                          <video src={buildMediaUrl(it.product.image)} className="h-12 w-12 rounded-lg object-cover flex-shrink-0 border border-gray-700" muted playsInline />
                         ) : (
-                          <img src={buildMediaUrl(it.product.image)} alt={it.product?.name} className="h-10 w-10 rounded object-cover" />
+                          <img src={buildMediaUrl(it.product.image)} alt={it.product?.name} className="h-12 w-12 rounded-lg object-cover flex-shrink-0 border border-gray-700" />
                         )
                       )}
-                      <div>
+                      <div className="flex-1 min-w-0">
                         <a
                           href={`/producto/${it.product_id}`}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="text-white font-medium hover:text-yellow-400 transition-colors cursor-pointer"
+                          className="text-sm font-medium text-white hover:text-yellow-400 transition-colors cursor-pointer"
                         >
                           {it.product?.name || `Producto ${it.product_id}`}
                         </a>
-                        <p className="text-gray-400 text-xs">SKU: {it.product?.sku || it.product_id}</p>
-                        {it.variant && (
-                          <p className="text-gray-300 text-xs">
-                            {it.variant.model ? `Modelo: ${it.variant.model}` : 'Principal'}
-                            {it.variant.size && ` - Talla: ${it.variant.size}`}
-                            {it.variant_id && ` (ID: ${it.variant_id})`}
-                          </p>
-                        )}
+                        <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                          <span className="text-xs text-gray-500">SKU: {it.variant?.sku || it.product?.sku || it.product_id}</span>
+                          {it.variant && (
+                            <span className="text-xs text-gray-400">
+                              {it.variant.model ? `· ${it.variant.model}` : ''}
+                              {it.variant.size ? ` T:${it.variant.size}` : ''}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="text-right flex-shrink-0">
+                        <p className="text-sm font-semibold text-white">${it.price}</p>
+                        <p className="text-xs text-gray-500">×{it.quantity}</p>
                       </div>
                     </div>
-                    <div className="text-gray-300 text-sm">x{it.quantity} · ${it.price}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* URL de tracking si está disponible */}
-            {orderDetails.tracking_code && orderDetails.courier_url && (
-              <div className="mt-6">
-                <h4 className="text-lg font-semibold text-white mb-3">Seguimiento del Envío</h4>
-                <div className="bg-gray-700 rounded-lg p-4">
-                  <a
-                    href={`${orderDetails.courier_url}${orderDetails.tracking_code}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center space-x-2 text-yellow-400 hover:text-yellow-300 transition-colors"
-                  >
-                    <Truck className="h-5 w-5" />
-                    <span>Rastrear envío en {orderDetails.courier_name}</span>
-                  </a>
+                  ))}
                 </div>
               </div>
-            )}
+
+              <div className="border-t border-gray-700/50" />
+
+              {/* Datos de Facturación */}
+              <div>
+                <div className="flex items-center gap-2 mb-3">
+                  <FileText className="h-3.5 w-3.5 text-yellow-400" />
+                  <span className="text-xs font-semibold text-yellow-400 uppercase tracking-widest">Datos de Facturación</span>
+                  {orderDetails.billing_snapshot && (
+                    <span className="ml-auto text-[10px] font-bold px-2 py-0.5 rounded-full bg-green-500/15 text-green-400 border border-green-500/25">
+                      Solicitó CFDI
+                    </span>
+                  )}
+                </div>
+                {orderDetails.billing_snapshot ? (
+                  <div className="bg-gray-800/50 rounded-xl border border-gray-700/50 divide-y divide-gray-700/40">
+                    {([
+                      { label: 'RFC',             value: orderDetails.billing_snapshot.rfc },
+                      { label: 'Razón Social',    value: orderDetails.billing_snapshot.razon_social },
+                      { label: 'C.P. Fiscal',     value: orderDetails.billing_snapshot.cp_fiscal },
+                      { label: 'Régimen Fiscal',  value: orderDetails.billing_snapshot.regimen_fiscal },
+                      { label: 'Uso de CFDI',     value: orderDetails.billing_snapshot.uso_cfdi },
+                      ...(orderDetails.billing_snapshot.email_facturacion
+                        ? [{ label: 'Email Facturación', value: orderDetails.billing_snapshot.email_facturacion }]
+                        : []),
+                    ] as { label: string; value: string }[]).map(({ label, value }) => (
+                      <div key={label} className="flex justify-between items-center px-4 py-2.5 gap-4">
+                        <span className="text-xs text-gray-500 flex-shrink-0">{label}</span>
+                        <span className="text-sm text-white font-medium text-right break-all">{value || '—'}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="bg-gray-800/30 rounded-xl border border-dashed border-gray-700/50 px-4 py-3.5 flex items-center gap-3">
+                    <AlertCircle className="h-4 w-4 text-gray-600 flex-shrink-0" />
+                    <p className="text-sm text-gray-500">El cliente no solicitó factura en esta compra.</p>
+                  </div>
+                )}
+              </div>
+
+              <div className="border-t border-gray-700/50" />
+
+              {/* Guía de envío */}
+              <div>
+                <div className="flex items-center gap-2 mb-3">
+                  <Truck className="h-3.5 w-3.5 text-yellow-400" />
+                  <span className="text-xs font-semibold text-yellow-400 uppercase tracking-widest">Guía de Envío</span>
+                </div>
+
+                {orderDetails.tracking_code ? (
+                  <div className="bg-gray-800/50 rounded-xl border border-gray-700/50 p-4 space-y-4">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <p className="text-xs text-gray-500 mb-1">Código de rastreo</p>
+                        <p className="text-white font-mono font-semibold text-sm">{orderDetails.tracking_code}</p>
+                        {orderDetails.courier_name && (
+                          <p className="text-xs text-gray-500 mt-0.5">{orderDetails.courier_name}</p>
+                        )}
+                      </div>
+                      {orderDetails.courier_url && (
+                        <a
+                          href={`${orderDetails.courier_url}${orderDetails.tracking_code}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex-shrink-0 flex items-center gap-1.5 text-xs text-yellow-400 hover:text-yellow-300 transition-colors px-3 py-1.5 bg-yellow-500/10 hover:bg-yellow-500/20 rounded-lg border border-yellow-500/20"
+                        >
+                          <Truck className="h-3.5 w-3.5" />
+                          Rastrear
+                        </a>
+                      )}
+                    </div>
+
+                    {cancelGuideState === 'idle' && (
+                      <div className="pt-2 border-t border-gray-700/50">
+                        <button
+                          onClick={() => setCancelGuideState('confirming')}
+                          className="flex items-center gap-2 text-xs text-red-400 hover:text-red-300 transition-colors cursor-pointer group/cancel"
+                        >
+                          <div className="p-1 rounded bg-red-500/10 group-hover/cancel:bg-red-500/20 transition-colors">
+                            <Trash2 className="h-3 w-3" />
+                          </div>
+                          Cancelar guía y permitir generar nueva
+                        </button>
+                      </div>
+                    )}
+
+                    {cancelGuideState === 'confirming' && (
+                      <div className="pt-2 border-t border-red-500/20 space-y-3">
+                        <div className="flex items-start gap-2">
+                          <AlertCircle className="h-4 w-4 text-red-400 flex-shrink-0 mt-0.5" />
+                          <div>
+                            <p className="text-sm font-medium text-red-400">Cancelar guía</p>
+                            <p className="text-xs text-gray-400 mt-0.5">
+                              Se enviará la solicitud de cancelación a Empak2 y la orden volverá a estado <span className="text-yellow-400 font-medium">pagado</span> para generar una nueva guía.
+                            </p>
+                          </div>
+                        </div>
+                        <div>
+                          <label className="block text-xs text-gray-500 mb-1.5">Motivo de cancelación (opcional)</label>
+                          <input
+                            type="text"
+                            value={cancelGuideMotivo}
+                            onChange={(e) => setCancelGuideMotivo(e.target.value)}
+                            placeholder="Ej: Error en dirección de envío"
+                            className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-red-400/50 transition-colors"
+                          />
+                        </div>
+                        {cancelGuideError && (
+                          <p className="text-xs text-red-400 bg-red-500/10 rounded-lg px-3 py-2">{cancelGuideError}</p>
+                        )}
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => { setCancelGuideState('idle'); setCancelGuideError(''); setCancelGuideMotivo(''); }}
+                            className="flex-1 px-3 py-2 bg-gray-700 hover:bg-gray-600 border border-gray-600 rounded-lg text-xs text-gray-300 hover:text-white transition-colors cursor-pointer"
+                          >
+                            Volver
+                          </button>
+                          <button
+                            onClick={handleCancelGuide}
+                            className="flex-1 px-3 py-2 bg-red-600 hover:bg-red-500 rounded-lg text-xs text-white font-semibold transition-colors cursor-pointer flex items-center justify-center gap-1.5"
+                          >
+                            <Trash2 className="h-3 w-3" />
+                            Confirmar cancelación
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {cancelGuideState === 'loading' && (
+                      <div className="pt-2 border-t border-gray-700/50 flex items-center gap-2 text-xs text-gray-400">
+                        <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                        Cancelando guía en Empak2...
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="bg-gray-800/30 rounded-xl border border-dashed border-gray-700/50 p-4 flex items-center justify-between gap-4">
+                    <div>
+                      <p className="text-sm text-gray-400">Sin guía generada</p>
+                      <p className="text-xs text-gray-600 mt-0.5">La orden está lista para generar una guía de envío.</p>
+                    </div>
+                    <button
+                      onClick={() => {
+                        const orderId = orderDetails.order_id || orderDetails.id;
+                        setSelectedOrderIds([orderId]);
+                        setShowOrderDetails({ show: false, orderId: null });
+                        setShowCourierModal(true);
+                      }}
+                      className="flex-shrink-0 flex items-center gap-1.5 px-3 py-2 bg-yellow-500 hover:bg-yellow-400 text-black text-xs font-semibold rounded-lg transition-colors cursor-pointer"
+                    >
+                      <Truck className="h-3.5 w-3.5" />
+                      Generar guía
+                    </button>
+                  </div>
+                )}
+              </div>
+
+            </div>
+
+            {/* Footer sticky */}
+            <div className="flex-shrink-0 bg-gray-900/95 backdrop-blur-sm px-6 py-3 border-t border-gray-700/50 flex justify-end rounded-b-2xl">
+              <button
+                onClick={() => {
+                  setShowOrderDetails({ show: false, orderId: null });
+                  setCancelGuideState('idle');
+                  setCancelGuideMotivo('');
+                  setCancelGuideError('');
+                }}
+                className="px-4 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-xl text-sm text-gray-300 hover:text-white transition-all cursor-pointer"
+              >
+                Cerrar
+              </button>
+            </div>
+
           </div>
         </div>
       )}

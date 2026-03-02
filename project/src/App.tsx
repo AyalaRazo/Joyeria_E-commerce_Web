@@ -73,6 +73,10 @@ function App() {
   const location = useLocation();
   const navigate = useNavigate();
 
+  // Scroll al inicio en cada cambio de ruta
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [location.pathname]);
 
   // Escuchar eventos de cambio de modo de autenticación
   useEffect(() => {

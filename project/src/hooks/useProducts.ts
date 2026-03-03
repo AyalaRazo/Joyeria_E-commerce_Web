@@ -95,6 +95,21 @@ export const useProducts = () => {
 
         if (imagesError) console.error('⚠️ Error imágenes:', imagesError);
 
+        // Cargar ratings de reviews
+        const { data: reviewsData } = await supabase
+          .from('reviews')
+          .select('product_id, rating')
+          .in('product_id', productIds);
+
+        // Calcular avg_rating y review_count por producto
+        const ratingMap = new Map<number, { sum: number; count: number }>();
+        (reviewsData || []).forEach((r: any) => {
+          const entry = ratingMap.get(r.product_id) || { sum: 0, count: 0 };
+          entry.sum += r.rating;
+          entry.count += 1;
+          ratingMap.set(r.product_id, entry);
+        });
+
         // Combinar datos
         let productsWithRelations = productsData.map(product => {
           const productVariants = variantsData?.filter(v => v.product_id === product.id) || [];
@@ -104,12 +119,16 @@ export const useProducts = () => {
             variant_images: variant.variant_images || [],
             images: variant.variant_images || []
           }));
-          
+
+          const ratingEntry = ratingMap.get(product.id);
+
           return {
             ...product,
             category: categories.find(cat => cat.id === product.category_id) || null,
             variants: normalizedVariants,
-            images: imagesData?.filter(img => img.product_id === product.id) || []
+            images: imagesData?.filter(img => img.product_id === product.id) || [],
+            avg_rating: ratingEntry ? ratingEntry.sum / ratingEntry.count : undefined,
+            review_count: ratingEntry?.count ?? 0,
           };
         });
 

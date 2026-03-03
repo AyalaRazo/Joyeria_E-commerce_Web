@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Product } from '../types';
-import { Sparkles } from 'lucide-react';
+import { Sparkles, Star } from 'lucide-react';
 import { buildMediaUrl, isVideoUrl } from '../utils/storage';
 import { supabase } from '../lib/supabase';
 
@@ -226,6 +226,39 @@ const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
       {/* Información del producto - más compacta */}
       <div className="p-3 sm:p-4 flex-1 flex flex-col">
         <div className="mb-2">
+          {/* Estrellas */}
+          {(product.review_count ?? 0) > 0 && product.avg_rating != null ? (
+            <div className="flex items-center gap-1 mb-1">
+              <div className="flex items-center gap-0.5">
+                {[1, 2, 3, 4, 5].map(i => {
+                  const fill = Math.min(Math.max(product.avg_rating! - (i - 1), 0), 1);
+                  return (
+                    <span key={i} className="relative inline-block w-3 h-3">
+                      <Star className="absolute inset-0 h-3 w-3 text-gray-600" />
+                      {fill > 0 && (
+                        <span
+                          className="absolute inset-0 overflow-hidden"
+                          style={{ width: `${fill * 100}%` }}
+                        >
+                          <Star className="h-3 w-3 text-yellow-400 fill-yellow-400" />
+                        </span>
+                      )}
+                    </span>
+                  );
+                })}
+              </div>
+              <span className="text-[10px] text-gray-400 leading-none">
+                {product.avg_rating!.toFixed(1)} ({product.review_count})
+              </span>
+            </div>
+          ) : (
+            <div className="flex items-center gap-0.5 mb-1">
+              {[1, 2, 3, 4, 5].map(i => (
+                <Star key={i} className="h-3 w-3 text-gray-700" />
+              ))}
+              <span className="text-[10px] text-gray-600 ml-1 leading-none">Sin reseñas</span>
+            </div>
+          )}
           <h3 className="text-sm lg:text-base font-bold text-white mb-1 group-hover:text-gray-300 transition-colors duration-200 line-clamp-2">
             {product.name}
           </h3>

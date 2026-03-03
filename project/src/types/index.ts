@@ -39,6 +39,8 @@ export interface Product {
   category?: Category;
   variants?: ProductVariant[];
   images?: ProductImage[];
+  avg_rating?: number;
+  review_count?: number;
 }
 
 export interface MetalType {

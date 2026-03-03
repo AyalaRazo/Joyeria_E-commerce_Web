@@ -1,12 +1,6 @@
 import React from 'react';
 
 const AboutUs: React.FC = () => {
-  const milestones = [
-    { year: '1985', text: 'Nace nuestro taller familiar en Mexicali, B.C.' },
-    { year: '1998', text: 'Abrimos nuestra primera boutique y presentamos colecciones exclusivas.' },
-    { year: '2015', text: 'Integramos procesos certificados de sostenibilidad y trazabilidad.' },
-    { year: '2024', text: 'Lanzamos la experiencia digital con asesoría personalizada.' },
-  ];
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-black via-gray-900 to-black py-16 px-4">
@@ -38,24 +32,58 @@ const AboutUs: React.FC = () => {
           </div>
         </section>
 
-        <section className="bg-gray-900/70 border border-gray-800 rounded-2xl p-6">
-          <h2 className="text-2xl font-semibold text-white mb-6">Línea de tiempo</h2>
-          <div className="space-y-4">
-            {milestones.map(item => (
-              <div key={item.year} className="flex items-start space-x-4">
-                <div className="text-yellow-400 font-semibold">{item.year}</div>
-                <p className="text-gray-300">{item.text}</p>
-              </div>
-            ))}
-          </div>
-        </section>
-
         <section className="text-center space-y-4 bg-gray-900/70 border border-gray-800 rounded-2xl p-8">
           <h2 className="text-2xl font-semibold text-white">Tu historia merece un brillo único</h2>
           <p className="text-gray-300 max-w-3xl mx-auto">
             Agenda una asesoría virtual o visítanos en el showroom para descubrir piezas únicas, personalizar
             un diseño desde cero o restaurar una joya que deseas seguir heredando.
           </p>
+        </section>
+
+        {/* Nuestras Sucursales */}
+        <section className="space-y-6">
+          <h2 className="text-2xl font-semibold text-white text-center">Nuestras Sucursales</h2>
+          <div className="grid md:grid-cols-2 gap-6">
+            {/* Plaza Cibeles */}
+            <div className="bg-gray-900/70 border border-gray-800 rounded-2xl overflow-hidden">
+              <div className="p-4 border-b border-gray-800">
+                <h3 className="text-white font-semibold text-lg">Plaza Cibeles</h3>
+                <p className="text-gray-400 text-sm mt-1">Blvd. Lázaro Cárdenas 1400-Local 2, Lázaro Cárdenas, 21370 Mexicali, B.C.</p>
+              </div>
+              <div className="w-full h-64">
+                <iframe
+                  src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d4752.2144251628215!2d-115.42244409297106!3d32.62421963905414!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x80d7710030d3b599%3A0xc4310c98a225ed81!2sJoyeria%20Orlando%20Plaza%20Cibeles!5e0!3m2!1ses!2smx!4v1772514499913!5m2!1ses!2smx"
+                  width="100%"
+                  height="100%"
+                  style={{ border: 0 }}
+                  allowFullScreen
+                  loading="lazy"
+                  referrerPolicy="no-referrer-when-downgrade"
+                  title="Joyeria Orlando Plaza Cibeles"
+                />
+              </div>
+            </div>
+
+            {/* Blvd. Lázaro Cárdenas */}
+            <div className="bg-gray-900/70 border border-gray-800 rounded-2xl overflow-hidden">
+              <div className="p-4 border-b border-gray-800">
+                <h3 className="text-white font-semibold text-lg">Blvd. Lázaro Cárdenas</h3>
+                <p className="text-gray-400 text-sm mt-1">Blvd. Lázaro Cárdenas 1353, Villanova, 21180 Mexicali, B.C.</p>
+              </div>
+              <div className="w-full h-64">
+                <iframe
+                  src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d53765.720229618644!2d-115.56402216875!3d32.62330149999999!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x80d77a5fa9657b3b%3A0xaa0fc17b5cc0e84!2sJoyer%C3%ADa%20de%20Plata%20Orlando!5e0!3m2!1ses!2smx!4v1772514616865!5m2!1ses!2smx"
+                  width="100%"
+                  height="100%"
+                  style={{ border: 0 }}
+                  allowFullScreen
+                  loading="lazy"
+                  referrerPolicy="no-referrer-when-downgrade"
+                  title="Joyeria Orlando Blvd. Lázaro Cárdenas"
+                />
+              </div>
+            </div>
+          </div>
         </section>
       </div>
     </div>

@@ -2699,18 +2699,17 @@ const fetchOrderDetails = async (orderId: number) => {
                       <td className="px-3 sm:px-6 py-3 sm:py-4 whitespace-nowrap">
                         <span
                           className={`px-2 py-1 rounded-full text-xs font-medium capitalize ${
-                            order.status === 'entregado'
-                              ? 'bg-green-500/20 text-green-400'
-                              : order.status === 'pagado'
-                                ? 'bg-blue-500/20 text-blue-400'
-                                : order.status === 'cancelado'
-                                  ? 'bg-red-500/20 text-red-400'
-                                  : order.status === 'devuelto' || order.status === 'parcialmente_devuelto' || order.status === 'reembolsado'
-                                    ? 'bg-orange-500/20 text-orange-400'
-                                    : order.status === 'procesando' || order.status === 'enviado'
-                                      ? 'bg-cyan-500/20 text-cyan-400'
-                                      : 'bg-yellow-500/20 text-yellow-400'
-                            }`}
+                            order.status === 'pendiente'             ? 'bg-yellow-500/20 text-yellow-400'
+                            : order.status === 'pagado'              ? 'bg-emerald-500/20 text-emerald-400'
+                            : order.status === 'procesando'          ? 'bg-blue-500/20 text-blue-400'
+                            : order.status === 'enviado'             ? 'bg-purple-500/20 text-purple-400'
+                            : order.status === 'entregado'           ? 'bg-green-500/20 text-green-400'
+                            : order.status === 'cancelado'           ? 'bg-red-500/20 text-red-400'
+                            : order.status === 'reembolsado'         ? 'bg-gray-500/20 text-gray-400'
+                            : order.status === 'devuelto'            ? 'bg-orange-500/20 text-orange-400'
+                            : order.status === 'parcialmente_devuelto' ? 'bg-amber-500/20 text-amber-400'
+                            : 'bg-gray-500/20 text-gray-400'
+                          }`}
                         >
                           {order.status ? order.status.charAt(0).toUpperCase() + order.status.slice(1).toLowerCase() : order.status}
                         </span>
@@ -5010,11 +5009,15 @@ const fetchOrderDetails = async (orderId: number) => {
                     Orden #{orderDetails.order_number || orderDetails.order_id}
                   </h3>
                   <span className={`text-xs font-bold px-2.5 py-1 rounded-full border ${
-                    orderDetails.status === 'pagado'    ? 'bg-green-500/15 text-green-400 border-green-500/30' :
-                    orderDetails.status === 'enviado'   ? 'bg-blue-500/15 text-blue-400 border-blue-500/30' :
-                    orderDetails.status === 'entregado' ? 'bg-purple-500/15 text-purple-400 border-purple-500/30' :
-                    orderDetails.status === 'cancelado' ? 'bg-red-500/15 text-red-400 border-red-500/30' :
-                    orderDetails.status === 'pendiente' ? 'bg-yellow-500/15 text-yellow-400 border-yellow-500/30' :
+                    orderDetails.status === 'pendiente'             ? 'bg-yellow-500/15 text-yellow-400 border-yellow-500/30' :
+                    orderDetails.status === 'pagado'                ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30' :
+                    orderDetails.status === 'procesando'            ? 'bg-blue-500/15 text-blue-400 border-blue-500/30' :
+                    orderDetails.status === 'enviado'               ? 'bg-purple-500/15 text-purple-400 border-purple-500/30' :
+                    orderDetails.status === 'entregado'             ? 'bg-green-500/15 text-green-400 border-green-500/30' :
+                    orderDetails.status === 'cancelado'             ? 'bg-red-500/15 text-red-400 border-red-500/30' :
+                    orderDetails.status === 'reembolsado'           ? 'bg-gray-500/15 text-gray-400 border-gray-500/30' :
+                    orderDetails.status === 'devuelto'              ? 'bg-orange-500/15 text-orange-400 border-orange-500/30' :
+                    orderDetails.status === 'parcialmente_devuelto' ? 'bg-amber-500/15 text-amber-400 border-amber-500/30' :
                     'bg-gray-700/60 text-gray-400 border-gray-600/40'
                   }`}>
                     {orderDetails.status ? orderDetails.status.charAt(0).toUpperCase() + orderDetails.status.slice(1) : '—'}

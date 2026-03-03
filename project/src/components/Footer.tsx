@@ -22,7 +22,7 @@ const Footer: React.FC = () => {
               <a href="https://www.instagram.com" className="p-1.5 bg-gray-800 hover:bg-gray-300 hover:text-black rounded transition-all duration-150 group">
                 <Instagram className="h-3.5 w-3.5 text-gray-400 group-hover:text-black" />
               </a>
-              <a href="https://www.facebook.com" target="_blank" className="p-1.5 bg-gray-800 hover:bg-gray-300 hover:text-black rounded transition-all duration-150 group">
+              <a href="https://www.facebook.com/p/Joyeria-orlando-100063996075978/" target="_blank" className="p-1.5 bg-gray-800 hover:bg-gray-300 hover:text-black rounded transition-all duration-150 group">
                 <Facebook className="h-3.5 w-3.5 text-gray-400 group-hover:text-black" />
               </a>
             </div>
@@ -54,15 +54,25 @@ const Footer: React.FC = () => {
             <div className="space-y-2">
               <div className="flex items-start space-x-1.5 text-gray-400">
                 <MapPin className="h-3.5 w-3.5 text-gray-300 mt-0.5 flex-shrink-0" />
-                <span className="text-xs leading-relaxed">Blvd. Lázaro Cárdenas 1400-Local 2, Mexicali, B.C.</span>
+                <div className="text-xs leading-relaxed space-y-1">
+                  <p className="text-gray-300 font-medium">Plaza Cibeles</p>
+                  <p>Blvd. Lázaro Cárdenas 1400-Local 2, Lázaro Cárdenas, 21370 Mexicali, B.C.</p>
+                </div>
+              </div>
+              <div className="flex items-start space-x-1.5 text-gray-400">
+                <MapPin className="h-3.5 w-3.5 text-gray-300 mt-0.5 flex-shrink-0" />
+                <div className="text-xs leading-relaxed space-y-1">
+                  <p className="text-gray-300 font-medium">Blvd. Lázaro Cárdenas</p>
+                  <p>Blvd. Lázaro Cárdenas 1353, Villanova, 21180 Mexicali, B.C.</p>
+                </div>
               </div>
               <div className="flex items-center space-x-1.5 text-gray-400">
                 <Phone className="h-3.5 w-3.5 text-gray-300 flex-shrink-0" />
-                <span className="text-xs">+52 686 000 0000</span>
+                <span className="text-xs">+52 686 582 2233</span>
               </div>
               <div className="flex items-center space-x-1.5 text-gray-400">
                 <Mail className="h-3.5 w-3.5 text-gray-300 flex-shrink-0" />
-                <span className="text-xs">joyeriaejemplo@gmail.com</span>
+                <span className="text-xs">joyeriaorlando9@gmail.com</span>
               </div>
             </div>
             

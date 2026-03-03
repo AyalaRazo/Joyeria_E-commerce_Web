@@ -14,7 +14,7 @@ const Hero: React.FC<HeroProps> = ({ onShopNow }) => {
   };
 
   return (
-    <section className="relative min-h-screen bg-black overflow-hidden">
+    <section className="relative min-h-[calc(100svh-4rem)] bg-black overflow-hidden">
 
       {/* Imagen de fondo */}
       <div className="absolute inset-0">
@@ -43,8 +43,8 @@ const Hero: React.FC<HeroProps> = ({ onShopNow }) => {
       </div>
 
       {/* Contenido principal */}
-      <div className="relative z-10 min-h-screen flex flex-col justify-center">
-        <div className="max-w-6xl mx-auto px-6 sm:px-10 lg:px-20 w-full py-24">
+      <div className="relative z-10 min-h-[calc(100svh-4rem)] flex flex-col justify-center">
+        <div className="max-w-6xl mx-auto px-6 sm:px-10 lg:px-20 w-full py-10 sm:py-16 lg:py-24">
           <div className="max-w-2xl xl:max-w-3xl">
 
             {/* Badge */}
@@ -75,7 +75,7 @@ const Hero: React.FC<HeroProps> = ({ onShopNow }) => {
             </p>
 
             {/* CTA */}
-            <div className="mb-16">
+            <div className="mb-6 sm:mb-10 lg:mb-16">
               <button
                 onClick={handleExplore}
                 className="group flex items-center justify-center gap-3 bg-gradient-to-r from-yellow-400 via-yellow-500 to-yellow-600 text-black px-8 py-3.5 rounded-full font-bold text-sm tracking-[0.15em] hover:shadow-xl hover:shadow-yellow-500/25 transition-all duration-300 cursor-pointer"

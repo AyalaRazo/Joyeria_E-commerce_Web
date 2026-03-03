@@ -79,7 +79,7 @@ const Footer: React.FC = () => {
             <div className="mt-4">
               <h4 className="text-xs font-semibold text-white mb-1.5">Horario</h4>
               <div className="text-xs text-gray-400 space-y-0.5">
-                <p>Lun-Vie: 09:00 - 19:00</p>
+                <p>Lun-Vie: 09:00 - 18:00</p>
                 <p>Sab: 09:00 - 14:00</p>
               </div>
             </div>

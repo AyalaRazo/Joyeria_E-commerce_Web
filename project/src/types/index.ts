@@ -34,8 +34,6 @@ export interface Product {
   warranty_unit?: string;
   warranty_description?: string;
   weight_grams?: number;
-  is_high_value?: boolean;
-  requires_special_shipping?: boolean;
   category?: Category;
   variants?: ProductVariant[];
   images?: ProductImage[];

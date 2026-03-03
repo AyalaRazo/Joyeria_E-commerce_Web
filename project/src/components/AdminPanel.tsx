@@ -119,8 +119,6 @@ const AdminPanel: React.FC = () => {
     warranty_unit: undefined as string | undefined,
     warranty_description: undefined as string | undefined,
     weight_grams: 100,
-    is_high_value: false,
-    requires_special_shipping: false,
     is_active: true,
     metal_type: null as number | null,
     carat: undefined as number | undefined,
@@ -326,33 +324,6 @@ const AdminPanel: React.FC = () => {
     });
   };
 
-
-  // Función para clasificar producto (alto valor y envío especial)
-  const classifyProduct = (product: typeof newProduct | Product) => {
-    const weight = product.weight_grams || 100;
-    const price = product.price || 0;
-    const material = (product.material || '').toLowerCase();
-
-    let isHighValue = false;
-    let requiresSpecialShipping = false;
-
-    // Alto valor por precio
-    if (price >= 10000) {
-      isHighValue = true;
-    }
-
-    // Alto valor por material
-    if (material.includes('oro') || material.includes('diamante') || material.includes('platino')) {
-      isHighValue = true;
-    }
-
-    // Envío especial
-    if (isHighValue || weight > 500) {
-      requiresSpecialShipping = true;
-    }
-
-    return { isHighValue, requiresSpecialShipping };
-  };
 
   const handleAddPackage = async () => {
     try {
@@ -750,9 +721,6 @@ const fetchOrderDetails = async (orderId: number) => {
         return;
       }
 
-      // Clasificar producto
-      const classification = classifyProduct(newProduct);
-
       // Extraer product_image_mode (campo de UI, no existe en la tabla products)
       const { product_image_mode, ...productFields } = newProduct;
 
@@ -762,8 +730,6 @@ const fetchOrderDetails = async (orderId: number) => {
           ...productFields,
           image: mainImageUrl,
           weight_grams: newProduct.weight_grams || 100,
-          is_high_value: classification.isHighValue,
-          requires_special_shipping: classification.requiresSpecialShipping,
           is_active: newProduct.is_active,
         }])
         .select('*')
@@ -827,8 +793,6 @@ const fetchOrderDetails = async (orderId: number) => {
         warranty_unit: undefined,
         warranty_description: undefined,
         weight_grams: 100,
-        is_high_value: false,
-        requires_special_shipping: false,
         is_active: true,
         metal_type: null,
         carat: undefined,
@@ -854,9 +818,6 @@ const fetchOrderDetails = async (orderId: number) => {
         const categoryName = categories.find(c => c.id === product.category_id)?.name || 'sin_categoria';
         updatedImage = await uploadImageToProductsBucket(productMainImageFile, categoryName, product.name);
       }
-
-      // Clasificar producto
-      const classification = classifyProduct(product);
 
       // Eliminar imágenes marcadas para eliminar
       if (imagesToDelete.length > 0) {
@@ -905,8 +866,6 @@ const fetchOrderDetails = async (orderId: number) => {
           is_new: product.is_new,
           is_featured: product.is_featured,
           weight_grams: product.weight_grams ?? 100,
-          is_high_value: classification.isHighValue,
-          requires_special_shipping: classification.requiresSpecialShipping,
           is_active: product.is_active ?? true,
           has_warranty: product.has_warranty ?? false,
           warranty_period: product.warranty_period,
@@ -3372,22 +3331,6 @@ const fetchOrderDetails = async (orderId: number) => {
                       </label>
                     ))}
                   </div>
-                  <div className="border-t border-gray-700/40 pt-3">
-                    <p className="text-[10px] text-gray-600 uppercase tracking-wide mb-2 font-medium">Calculado automáticamente</p>
-                    <div className="flex flex-wrap gap-4">
-                      {[
-                        { checked: newProduct.is_high_value || false, label: 'Alto Valor' },
-                        { checked: newProduct.requires_special_shipping || false, label: 'Envío Especial' },
-                      ].map(({ checked, label }) => (
-                        <div key={label} className="flex items-center gap-2 opacity-40">
-                          <div className={`w-4 h-4 rounded border flex items-center justify-center flex-shrink-0 ${checked ? 'bg-yellow-500/50 border-yellow-500/40' : 'bg-gray-700 border-gray-600'}`}>
-                            {checked && <svg className="w-2.5 h-2.5 text-black/70" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7"/></svg>}
-                          </div>
-                          <span className="text-sm text-gray-500">{label}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
                 </div>
               </div>
 
@@ -3812,22 +3755,6 @@ const fetchOrderDetails = async (orderId: number) => {
                         <span className="text-sm text-gray-300">{label}</span>
                       </label>
                     ))}
-                  </div>
-                  <div className="border-t border-gray-700/40 pt-3">
-                    <p className="text-[10px] text-gray-600 uppercase tracking-wide mb-2 font-medium">Calculado automáticamente</p>
-                    <div className="flex flex-wrap gap-4">
-                      {[
-                        { checked: editingProduct.is_high_value || false, label: 'Alto Valor' },
-                        { checked: editingProduct.requires_special_shipping || false, label: 'Envío Especial' },
-                      ].map(({ checked, label }) => (
-                        <div key={label} className="flex items-center gap-2 opacity-40">
-                          <div className={`w-4 h-4 rounded border flex items-center justify-center flex-shrink-0 ${checked ? 'bg-yellow-500/50 border-yellow-500/40' : 'bg-gray-700 border-gray-600'}`}>
-                            {checked && <svg className="w-2.5 h-2.5 text-black/70" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7"/></svg>}
-                          </div>
-                          <span className="text-sm text-gray-500">{label}</span>
-                        </div>
-                      ))}
-                    </div>
                   </div>
                 </div>
               </div>
@@ -4900,18 +4827,6 @@ const fetchOrderDetails = async (orderId: number) => {
                     <span className="text-gray-300">En Stock:</span>
                     <span className={`px-2 py-1 rounded-full text-xs font-medium ${productDetails.in_stock ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
                       {productDetails.in_stock ? 'Sí' : 'No'}
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-300">Alto Valor:</span>
-                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${productDetails.is_high_value ? 'bg-yellow-500/20 text-yellow-400' : 'bg-gray-500/20 text-gray-400'}`}>
-                      {productDetails.is_high_value ? 'Sí' : 'No'}
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-300">Envío Especial:</span>
-                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${productDetails.requires_special_shipping ? 'bg-orange-500/20 text-orange-400' : 'bg-gray-500/20 text-gray-400'}`}>
-                      {productDetails.requires_special_shipping ? 'Sí' : 'No'}
                     </span>
                   </div>
                 </div>

@@ -6,6 +6,7 @@ import { useCart } from '../hooks/useCart';
 import { supabase } from '../lib/supabase';
 import type { Product, ProductVariant, Review } from '../types';
 import { buildMediaUrl, isVideoUrl } from '../utils/storage';
+import { isProductNew } from '../utils/product';
 
 const ProductPage: React.FC = () => {
   const { id } = useParams();
@@ -39,6 +40,21 @@ const ProductPage: React.FC = () => {
 
   // Estados para productos relacionados
   const [relatedProducts, setRelatedProducts] = useState<Product[]>([]);
+
+  // Configuración de tienda
+  const [freeShippingThreshold, setFreeShippingThreshold] = useState(5000);
+
+  // Cargar configuración de tienda
+  useEffect(() => {
+    supabase
+      .from('store_settings')
+      .select('value')
+      .eq('key', 'free_shipping_threshold')
+      .single()
+      .then(({ data }) => {
+        if (data?.value) setFreeShippingThreshold(Number(data.value));
+      });
+  }, []);
 
   // Scroll al principio al cargar
   useEffect(() => {
@@ -856,7 +872,7 @@ const ProductPage: React.FC = () => {
                 </div>
                 <div>
                   <p className="text-white text-xs font-semibold">Envío gratis</p>
-                  <p className="text-gray-500 text-[10px]">En compras desde $5,000 MXN</p>
+                  <p className="text-gray-500 text-[10px]">En compras desde {new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 0 }).format(freeShippingThreshold)}</p>
                 </div>
               </div>
               {product.has_warranty && (
@@ -1212,7 +1228,7 @@ const ProductPage: React.FC = () => {
                       />
                     )}
                     {/* Badge Nuevo */}
-                    {relatedProduct.is_new && (
+                    {isProductNew(relatedProduct) && (
                       <span className="absolute top-2 left-2 bg-yellow-400 text-black text-[9px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide">
                         Nuevo
                       </span>

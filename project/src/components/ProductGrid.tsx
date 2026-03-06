@@ -1,6 +1,7 @@
 import React from 'react';
 import { Product } from '../types';
 import ProductCard from './ProductCard';
+import { isProductNew } from '../utils/product';
 
 interface ProductGridProps {
   products: Product[];
@@ -21,20 +22,22 @@ const ProductGrid: React.FC<ProductGridProps> = ({
 }) => {
   const getCategoryTitle = (cat: string) => {
     switch (cat) {
-      case 'rings': return 'Anillos';
-      case 'necklaces': return 'Collares';
-      case 'bracelets': return 'Pulseras';
-      case 'earrings': return 'Pendientes';
+      case 'Anillos': return 'Anillos';
+      case 'Collares': return 'Collares';
+      case 'Pulseras': return 'Pulseras';
+      case 'Aretes': return 'Aretes';
+      case 'Dijes': return 'Dijes';
       default: return 'Colección';
     }
   };
 
   const getCategoryDescription = (cat: string) => {
     switch (cat) {
-      case 'rings': return 'Anillos para momentos especiales';
-      case 'necklaces': return 'Collares que realzan tu elegancia';
-      case 'bracelets': return 'Pulseras que complementan tu estilo';
-      case 'earrings': return 'Pendientes que capturan la luz';
+      case 'Anillos': return 'Anillos para momentos especiales';
+      case 'Collares': return 'Collares que realzan tu elegancia';
+      case 'Pulseras': return 'Pulseras que complementan tu estilo';
+      case 'Aretes': return 'Aretes que capturan la luz';
+      case 'Dijes': return 'Dijes únicos para tu estilo';
       default: return 'Descubre nuestras creaciones exclusivas';
     }
   };
@@ -64,7 +67,7 @@ const ProductGrid: React.FC<ProductGridProps> = ({
       
       if (isOffer) return 1;
       if (p.is_featured) return 2;
-      if (p.is_new) return 3;
+      if (isProductNew(p)) return 3;
       return 4;
     };
     return getPriority(a) - getPriority(b);

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Package, Calendar, MapPin, Truck, CheckCircle, XCircle, Clock, RefreshCw, ExternalLink, Eye, Search } from 'lucide-react';
+import { Package, Calendar, Truck, CheckCircle, XCircle, Clock, RefreshCw, ExternalLink, Search } from 'lucide-react';
 import { useOrders } from '../hooks/useOrders';
 import { useAuth } from '../hooks/useAuth';
 import { supabase } from '../lib/supabase';
@@ -32,11 +32,6 @@ const OrdersPage: React.FC = () => {
   const [pagination, setPagination] = useState({ page: 1, limit: 10 });
 
   const [couriers, setCouriers] = useState<any[]>([]);
-  const [orderDetails, setOrderDetails] = useState<any>(null);
-  const [showOrderDetails, setShowOrderDetails] = useState<{
-    show: boolean;
-    orderId: number | null;
-  }>({ show: false, orderId: null });
 
   useEffect(() => { window.scrollTo(0, 0); }, []);
 
@@ -52,38 +47,6 @@ const OrdersPage: React.FC = () => {
     };
     fetchCouriers();
   }, []);
-
-  const fetchOrderDetails = async (orderId: number) => {
-    try {
-      const { data: orderData, error: orderError } = await supabase
-        .from('orders')
-        .select('shipping_snapshot')
-        .eq('id', orderId)
-        .maybeSingle();
-      if (orderError) throw orderError;
-
-      const { data: viewData, error: viewError } = await supabase
-        .from('view_orders_detailed')
-        .select('*')
-        .eq('order_id', orderId)
-        .maybeSingle();
-      if (viewError) throw viewError;
-
-      const { data: itemsData, error: itemsError } = await supabase
-        .from('order_items')
-        .select('*, product:products(*), variant:product_variants(*)')
-        .eq('order_id', orderId);
-      if (itemsError) throw itemsError;
-
-      setOrderDetails({
-        ...viewData,
-        shipping_snapshot: orderData?.shipping_snapshot,
-        order_items: itemsData || [],
-      });
-    } catch (err) {
-      console.error('Error fetching order details:', err);
-    }
-  };
 
   const getStatusIcon = (status: string) => {
     switch (status) {
@@ -521,16 +484,6 @@ const OrdersPage: React.FC = () => {
                                 Rastrear
                               </a>
                             )}
-                            <button
-                              onClick={() => {
-                                fetchOrderDetails(order.id);
-                                setShowOrderDetails({ show: true, orderId: order.id });
-                              }}
-                              className="flex items-center gap-1 px-2.5 py-1.5 bg-gray-700/80 hover:bg-gray-600 text-white rounded-lg text-xs font-medium transition-colors"
-                            >
-                              <Eye className="h-3 w-3" />
-                              Detalles
-                            </button>
                           </div>
                         </div>
                       </div>
@@ -609,101 +562,6 @@ const OrdersPage: React.FC = () => {
           );
         })()}
 
-        {/* Modal: order details */}
-        {showOrderDetails.show && orderDetails && (
-          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-            <div className="bg-gray-900 border border-gray-700 rounded-xl p-5 w-full max-w-3xl max-h-[88vh] overflow-y-auto shadow-2xl">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-base font-bold text-white">
-                  Pedido #{orderDetails.order_number || orderDetails.order_id}
-                </h3>
-                <button
-                  onClick={() => setShowOrderDetails({ show: false, orderId: null })}
-                  className="text-gray-500 hover:text-white transition-colors"
-                >
-                  <XCircle className="h-5 w-5" />
-                </button>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {/* Order info */}
-                <div>
-                  <h4 className="text-sm font-semibold text-gray-300 mb-2">Información</h4>
-                  <div className="bg-gray-800/60 border border-gray-700/60 rounded-lg p-3 space-y-2">
-                    {[
-                      { label: 'Estado', value: getStatusText(orderDetails.status) },
-                      { label: 'Total', value: `$${orderDetails.total.toFixed(2)}` },
-                      { label: 'Código de rastreo', value: orderDetails.tracking_code || 'Sin código' },
-                      { label: 'Paquetería', value: orderDetails.courier_name || 'Sin paquetería' },
-                      {
-                        label: 'Fecha',
-                        value: new Date(orderDetails.created_at).toLocaleDateString('es-ES', {
-                          day: 'numeric', month: 'long', year: 'numeric',
-                        }),
-                      },
-                    ].map(({ label, value }) => (
-                      <div key={label} className="flex justify-between items-start gap-2">
-                        <span className="text-gray-500 text-sm flex-shrink-0">{label}:</span>
-                        <span className="text-white font-medium text-sm text-right">{value}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Shipping address */}
-                <div>
-                  <h4 className="text-sm font-semibold text-gray-300 mb-2">Dirección de envío</h4>
-                  <div className="bg-gray-800/60 border border-gray-700/60 rounded-lg p-3">
-                    <div className="flex items-start gap-2">
-                      <MapPin className="h-4 w-4 text-yellow-400 mt-0.5 flex-shrink-0" />
-                      <div className="text-sm space-y-0.5">
-                        {orderDetails.shipping_snapshot ? (
-                          <>
-                            {orderDetails.shipping_snapshot.name && (
-                              <p className="text-white font-medium">{orderDetails.shipping_snapshot.name}</p>
-                            )}
-                            <p className="text-gray-300">{orderDetails.shipping_snapshot.address_line1}</p>
-                            {orderDetails.shipping_snapshot.address_line2 && (
-                              <p className="text-gray-400">{orderDetails.shipping_snapshot.address_line2}</p>
-                            )}
-                            <p className="text-gray-300">
-                              {[orderDetails.shipping_snapshot.city, orderDetails.shipping_snapshot.state, orderDetails.shipping_snapshot.postal_code]
-                                .filter(Boolean).join(', ')}
-                            </p>
-                            {orderDetails.shipping_snapshot.phone && (
-                              <p className="text-gray-500 text-xs">{orderDetails.shipping_snapshot.phone}</p>
-                            )}
-                          </>
-                        ) : (
-                          <>
-                            <p className="text-white font-medium">{orderDetails.shipping_city || 'Sin ciudad'}</p>
-                            <p className="text-gray-400">{orderDetails.shipping_state || ''}</p>
-                          </>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Tracking link */}
-              {orderDetails.tracking_code && orderDetails.courier_url && (
-                <div className="mt-4 p-3 bg-gray-800/60 border border-gray-700/60 rounded-lg">
-                  <a
-                    href={`${orderDetails.courier_url}${orderDetails.tracking_code}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-2 text-yellow-400 hover:text-yellow-300 transition-colors text-sm font-medium"
-                  >
-                    <Truck className="h-4 w-4" />
-                    Rastrear en {orderDetails.courier_name}
-                    <ExternalLink className="h-3.5 w-3.5" />
-                  </a>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );

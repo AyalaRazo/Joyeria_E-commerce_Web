@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Package, ExternalLink, Truck, MapPin, ChevronDown, ChevronUp, Phone } from 'lucide-react';
+import { Package, ExternalLink, Truck, MapPin, Phone, ChevronDown, ChevronUp } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import type { Order } from '../types';
 import { buildMediaUrl, getVariantFirstImage } from '../utils/storage';
@@ -41,9 +41,11 @@ const OrderCard: React.FC<OrderCardProps> = ({ order, compact = false }) => {
   const formatAddress = (address: any) => {
     if (!address) return 'Dirección no disponible';
     const extInt = [address.exterior_number, address.interior_number].filter(Boolean);
-    const extIntStr = extInt.length ? ` ${extInt.join(' int. ')}` : '';
+    const extIntStr = extInt.length ? extInt.join(' int. ') : '';
+    // Combina calle + números; si no hay calle los números igual aparecen solos
+    const streetLine = [address.address_line2, extIntStr].filter(Boolean).join(' ') || null;
     const parts = [
-      address.address_line2 ? `${address.address_line2}${extIntStr}`.trim() : null,
+      streetLine,
       address.address_line1,
       address.city,
       address.state,
@@ -135,6 +137,15 @@ const OrderCard: React.FC<OrderCardProps> = ({ order, compact = false }) => {
           )}
         </div>
 
+        {/* Toggle button */}
+        <button
+          onClick={() => setExpanded(prev => !prev)}
+          className="flex-shrink-0 flex items-center gap-1 px-2 py-1 rounded-lg text-xs text-gray-400 hover:text-white hover:bg-gray-700/50 transition-all"
+        >
+          {expanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+          {expanded ? 'Ocultar' : 'Detalles'}
+        </button>
+
         {/* Product names */}
         <div className="flex-1 min-w-0">
           {items.slice(0, 2).map((item, idx) => (
@@ -156,18 +167,7 @@ const OrderCard: React.FC<OrderCardProps> = ({ order, compact = false }) => {
         </div>
       </div>
 
-      {/* Expand toggle */}
-      {items.length > 0 && (
-        <button
-          onClick={() => setExpanded(!expanded)}
-          className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg border border-gray-700/50 hover:border-gray-600 hover:bg-gray-800/30 transition-all text-[10px] text-gray-500 hover:text-gray-300"
-        >
-          {expanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-          {expanded ? 'Ocultar detalle' : 'Ver detalle del pedido'}
-        </button>
-      )}
-
-      {/* Expanded detail */}
+      {/* Detail */}
       {expanded && (
         <div className="space-y-3 pt-1 border-t border-gray-700/40">
           {/* Items list */}
@@ -256,7 +256,20 @@ const OrderCard: React.FC<OrderCardProps> = ({ order, compact = false }) => {
                 <MapPin className="h-3.5 w-3.5 mt-0.5 flex-shrink-0 text-gray-500" />
                 <div className="min-w-0">
                   {address.name && <p className="text-gray-300 font-medium truncate">{address.name}</p>}
-                  <p className="truncate">{formatAddress(address)}</p>
+                  {address.address_line1 && <p className="truncate">{address.address_line1}</p>}
+                  {(address.address_line2 || address.exterior_number || address.interior_number) && (
+                    <p className="truncate">
+                      {address.address_line2}
+                      {(address.exterior_number || address.interior_number)
+                        ? ` ${[address.exterior_number, address.interior_number].filter(Boolean).join(' int. ')}`
+                        : ''}
+                    </p>
+                  )}
+                  {(address.city || address.state || address.postal_code) && (
+                    <p className="truncate">
+                      {address.city}{address.state ? `, ${address.state}` : ''}{address.postal_code ? ` CP ${address.postal_code}` : ''}
+                    </p>
+                  )}
                   {address.phone && (
                     <p className="flex items-center gap-1 mt-0.5 text-gray-500">
                       <Phone className="h-3 w-3" /> {address.phone}

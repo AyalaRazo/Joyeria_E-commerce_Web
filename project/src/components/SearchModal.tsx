@@ -5,6 +5,7 @@ import { Product } from '../types/index';
 import { useNavigate } from 'react-router-dom';
 import { useProducts } from '../hooks/useProducts';
 import { buildMediaUrl } from '../utils/storage';
+import { isProductNew } from '../utils/product';
 
 interface SearchModalProps {
   isOpen: boolean;
@@ -72,7 +73,7 @@ const SearchModal: React.FC<SearchModalProps> = ({
       discountPercentage,
       image,
       isFeatured: product.is_featured ?? false,
-      isNew: product.is_new ?? false,
+      isNew: isProductNew(product),
       categoryName,
       model: selectedModel,
       material: material // Agregado material aquí

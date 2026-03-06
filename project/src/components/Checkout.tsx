@@ -89,6 +89,7 @@ const Checkout: React.FC<CheckoutProps> = ({
   const [shippingQuote, setShippingQuote] = useState<{ shipping_cost: number; selected?: { proveedor: string; code_servicio: string; nombre_servicio: string; total: number; courier_id?: number } } | null>(null);
   const [loadingQuotes, setLoadingQuotes] = useState(false);
   const [quoteError, setQuoteError] = useState('');
+  const [storeConfig, setStoreConfig] = useState<{ freeShippingThreshold: number; standardShippingCost: number } | null>(null);
   
   // Estado para imágenes de variantes
   const [variantImages, setVariantImages] = useState<Map<number, string>>(new Map());
@@ -192,6 +193,21 @@ const Checkout: React.FC<CheckoutProps> = ({
       setSelectionError('');
       setAddressFeedback('');
       setCurrentStep(1);
+      // Cargar configuración de tienda (umbral de envío gratis)
+      supabase
+        .from('store_settings')
+        .select('key, value')
+        .in('key', ['free_shipping_threshold', 'standard_shipping_cost'])
+        .then(({ data }) => {
+          if (data) {
+            const map: Record<string, number> = {};
+            data.forEach((row: any) => { map[row.key] = Number(row.value); });
+            setStoreConfig({
+              freeShippingThreshold: map.free_shipping_threshold ?? 5000,
+              standardShippingCost: map.standard_shipping_cost ?? 250,
+            });
+          }
+        });
     }
   }, [isOpen, load]);
 
@@ -202,10 +218,12 @@ const Checkout: React.FC<CheckoutProps> = ({
     }).format(price);
   };
 
-  // Costo de envío: solo disponible tras cotización (no mostrar valor por defecto antes)
-  const shippingCost: number | null = shippingQuote?.shipping_cost ?? null;
   const taxRate = 0.16; // 16% IVA en México
   const tax = totalPrice * taxRate;
+  // Envío gratis si subtotal+IVA supera el umbral configurado en tienda
+  const isShippingFree = storeConfig != null && (totalPrice + tax) >= storeConfig.freeShippingThreshold;
+  const rawShippingCost: number | null = shippingQuote?.shipping_cost ?? null;
+  const shippingCost: number | null = isShippingFree ? 0 : rawShippingCost;
   const finalTotal = totalPrice + (shippingCost ?? 0) + tax;
 
   const validateForm = (): boolean => {
@@ -1057,7 +1075,14 @@ const Checkout: React.FC<CheckoutProps> = ({
                   {/* Costo de envío (paquetería asignada por prioridad, sin selección) */}
                   <div className="bg-gray-800/30 rounded-lg p-4 border border-gray-700">
                     <h4 className="font-semibold text-white mb-3">Envío</h4>
-                    {loadingQuotes ? (
+                    {isShippingFree ? (
+                      <div className="space-y-1">
+                        <p className="text-white">
+                          Costo de envío: <span className="font-bold text-green-400">GRATIS</span>
+                        </p>
+                        <p className="text-xs text-green-500">Tu pedido califica para envío gratis</p>
+                      </div>
+                    ) : loadingQuotes ? (
                       <p className="text-gray-400 text-sm">Calculando costo de envío...</p>
                     ) : quoteError ? (
                       <p className="text-amber-400 text-sm">{quoteError}</p>
@@ -1131,8 +1156,12 @@ const Checkout: React.FC<CheckoutProps> = ({
                       </div>
                       <div className="flex justify-between">
                         <span className="text-gray-300">Envío:</span>
-                        <span className="text-white font-medium">
-                          {shippingCost !== null ? formatPrice(shippingCost) : <span className="text-gray-500 italic">Por calcular</span>}
+                        <span className="font-medium">
+                          {isShippingFree
+                            ? <span className="text-green-400 font-bold">GRATIS</span>
+                            : shippingCost !== null
+                              ? <span className="text-white">{formatPrice(shippingCost)}</span>
+                              : <span className="text-gray-500 italic">Por calcular</span>}
                         </span>
                       </div>
                       <div className="flex justify-between">
@@ -1142,7 +1171,9 @@ const Checkout: React.FC<CheckoutProps> = ({
                       <div className="flex justify-between text-sm pt-2 border-t border-gray-600">
                         <span className="font-bold text-white">Total:</span>
                         <span className="font-bold text-yellow-400">
-                          {shippingCost !== null ? formatPrice(finalTotal) : <span className="text-gray-400 italic text-xs">Pendiente de envío</span>}
+                          {isShippingFree || shippingCost !== null
+                            ? formatPrice(finalTotal)
+                            : <span className="text-gray-400 italic text-xs">Pendiente de envío</span>}
                         </span>
                       </div>
                     </div>
@@ -1253,8 +1284,12 @@ const Checkout: React.FC<CheckoutProps> = ({
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-400">Envío:</span>
-                  <span className="text-white">
-                    {shippingCost !== null ? formatPrice(shippingCost) : <span className="text-gray-500 italic text-xs">Por calcular</span>}
+                  <span>
+                    {isShippingFree
+                      ? <span className="text-green-400 font-bold">GRATIS</span>
+                      : shippingCost !== null
+                        ? <span className="text-white">{formatPrice(shippingCost)}</span>
+                        : <span className="text-gray-500 italic text-xs">Por calcular</span>}
                   </span>
                 </div>
                 <div className="flex justify-between">
@@ -1265,7 +1300,7 @@ const Checkout: React.FC<CheckoutProps> = ({
                   <div className="flex justify-between">
                     <span className="font-bold text-white">Total:</span>
                     <span className="font-bold text-gray-300">
-                      {shippingCost !== null ? formatPrice(finalTotal) : <span className="text-gray-500 italic text-xs">+ envío</span>}
+                      {isShippingFree || shippingCost !== null ? formatPrice(finalTotal) : <span className="text-gray-500 italic text-xs">+ envío</span>}
                     </span>
                   </div>
                 </div>

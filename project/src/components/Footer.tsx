@@ -34,6 +34,7 @@ const Footer: React.FC = () => {
             <ul className="space-y-1.5">
               {[
                 { label: 'Sobre Nosotros', to: '/sobre-nosotros' },
+                { label: 'Contacto', to: '/contacto' },
                 { label: 'Factura tu Compra', to: '/factura-tu-compra' },
                 { label: 'Cuidado de Joyas', to: '/cuidado-de-joyas' },
                 { label: 'Garantía', to: '/garantia' },
@@ -55,24 +56,32 @@ const Footer: React.FC = () => {
               <div className="flex items-start space-x-1.5 text-gray-400">
                 <MapPin className="h-3.5 w-3.5 text-gray-300 mt-0.5 flex-shrink-0" />
                 <div className="text-xs leading-relaxed space-y-1">
-                  <p className="text-gray-300 font-medium">Plaza Cibeles</p>
+                  <p className="text-gray-300 font-medium">Sucursal Lazaro Cardenas</p>
                   <p>Blvd. Lázaro Cárdenas 1400-Local 2, Lázaro Cárdenas, 21370 Mexicali, B.C.</p>
-                </div>
-              </div>
-              <div className="flex items-start space-x-1.5 text-gray-400">
-                <MapPin className="h-3.5 w-3.5 text-gray-300 mt-0.5 flex-shrink-0" />
-                <div className="text-xs leading-relaxed space-y-1">
-                  <p className="text-gray-300 font-medium">Blvd. Lázaro Cárdenas</p>
-                  <p>Blvd. Lázaro Cárdenas 1353, Villanova, 21180 Mexicali, B.C.</p>
                 </div>
               </div>
               <div className="flex items-center space-x-1.5 text-gray-400">
                 <Phone className="h-3.5 w-3.5 text-gray-300 flex-shrink-0" />
                 <span className="text-xs">+52 686 582 2233</span>
               </div>
+              <div className="flex items-start space-x-1.5 text-gray-400">
+                <MapPin className="h-3.5 w-3.5 text-gray-300 mt-0.5 flex-shrink-0" />
+                <div className="text-xs leading-relaxed space-y-1">
+                  <p className="text-gray-300 font-medium">Sucursal Villafontana</p>
+                  <p>Blvd. Lázaro Cárdenas 1353, Villanova, 21180 Mexicali, B.C.</p>
+                </div>
+              </div>
+              <div className="flex items-center space-x-1.5 text-gray-400">
+                <Phone className="h-3.5 w-3.5 text-gray-300 flex-shrink-0" />
+                <span className="text-xs">+52686 556 6514</span>
+              </div>
               <div className="flex items-center space-x-1.5 text-gray-400">
                 <Mail className="h-3.5 w-3.5 text-gray-300 flex-shrink-0" />
                 <span className="text-xs">joyeriaorlando9@gmail.com</span>
+              </div>
+              <div className="flex items-center space-x-1.5 text-gray-400">
+                <Mail className="h-3.5 w-3.5 text-gray-300 flex-shrink-0" />
+                <span className="text-xs">contacto@joyeriaorlando.com</span>
               </div>
             </div>
             

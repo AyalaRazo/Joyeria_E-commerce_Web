@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase';
 import { motion } from "framer-motion";
 
 import { Product, Order, ProductVariant, UserRole, Courier, SalesSummary, SalesFinancial, CourierPerformance, ShippingSummary } from '../types';
-import { Search, Package, RefreshCw, X, Save, Edit, Plus, Trash2, RotateCcw, Eye, AlertCircle, Filter, TrendingUp, Users, Truck, MapPin, Coins, DollarSign, ChevronDown, Tag, Image, FileText } from 'lucide-react';
+import { Search, Package, RefreshCw, X, Save, Edit, Plus, Trash2, RotateCcw, Eye, AlertCircle, Filter, TrendingUp, Users, Truck, MapPin, Coins, DollarSign, ChevronDown, Tag, Image, FileText, Settings, CheckCircle, Download, Sparkles, Star } from 'lucide-react';
 import {
   LineChart,
   Line,
@@ -18,6 +18,7 @@ import { useUserManagement } from '../hooks/useUserManagement';
 import { useAuth } from '../hooks/useAuth';
 import { useProducts } from '../hooks/useProducts';
 import { uploadImageToProductsBucket, buildMediaUrl, isVideoUrl } from '../utils/storage';
+import { isProductNew } from '../utils/product';
 
 const AdminPanel: React.FC = () => {
   type ShippingPackage = {
@@ -122,7 +123,9 @@ const AdminPanel: React.FC = () => {
     is_active: true,
     metal_type: null as number | null,
     carat: undefined as number | undefined,
-    product_image_mode: 'base' as 'base' | 'variant'
+    product_image_mode: 'base' as 'base' | 'variant',
+    model: '',
+    size: ''
   });
   const [showAddUser, setShowAddUser] = useState(false);
   const [newUser, setNewUser] = useState({
@@ -206,6 +209,16 @@ const AdminPanel: React.FC = () => {
     endDate: ''
   });
 
+  // Estados para configuración de tienda
+  const [storeSettings, setStoreSettings] = useState({
+    free_shipping_threshold: '5000',
+    standard_shipping_cost: '250',
+    default_courier_id: '',
+    new_product_days: '30',
+  });
+  const [savingSettings, setSavingSettings] = useState(false);
+  const [settingsSaved, setSettingsSaved] = useState(false);
+
   // Estados para couriers
   const [couriers, setCouriers] = useState<Courier[]>([]);
   // Removido: edición de courier_id deshabilitada
@@ -250,6 +263,8 @@ const AdminPanel: React.FC = () => {
     switch (activeTab) {
       case 'dashboard':
         fetchDashboardData();
+        loadStoreSettings();
+        fetchCouriers();
         break;
       case 'products':
         fetchProducts();
@@ -279,9 +294,11 @@ const AdminPanel: React.FC = () => {
     }
   }, [activeTab]);
 
-  // Cargar daashboard al inicio
+  // Cargar dashboard al inicio
   useEffect(() => {
     fetchDashboardData();
+    loadStoreSettings();
+    fetchCouriers();
   }, []);
 
   const fetchCouriers = async () => {
@@ -444,9 +461,44 @@ const AdminPanel: React.FC = () => {
     }
   };
 
+  const loadStoreSettings = async () => {
+    try {
+      const { data } = await supabase
+        .from('store_settings')
+        .select('key, value')
+        .in('key', ['free_shipping_threshold', 'standard_shipping_cost', 'default_courier_id', 'new_product_days']);
+      if (data) {
+        const map: Record<string, string> = {};
+        data.forEach((row: any) => { map[row.key] = row.value; });
+        setStoreSettings(prev => ({ ...prev, ...map }));
+      }
+    } catch (err) {
+      console.error('Error loading store settings:', err);
+    }
+  };
 
+  const saveStoreSettings = async () => {
+    setSavingSettings(true);
+    try {
+      const upserts = Object.entries(storeSettings).map(([key, value]) => ({
+        key,
+        value: String(value),
+        updated_at: new Date().toISOString(),
+      }));
+      const { error } = await supabase
+        .from('store_settings')
+        .upsert(upserts, { onConflict: 'key' });
+      if (error) throw error;
+      setSettingsSaved(true);
+      setTimeout(() => setSettingsSaved(false), 3000);
+    } catch (err) {
+      console.error('Error saving store settings:', err);
+      alert('Error al guardar la configuración');
+    } finally {
+      setSavingSettings(false);
+    }
+  };
 
-  
 const [orderDetailItems, setOrderDetailItems] = useState<any[]>([]);
 const shippingInfo = orderDetails
   ? orderDetails.shipping_snapshot || {
@@ -498,10 +550,21 @@ const fetchOrderDetails = async (orderId: number) => {
       .eq('id', orderId)
       .maybeSingle();
 
+    const { data: labelData } = await supabase
+      .from('shipping_labels')
+      .select('id, label_url, status')
+      .eq('order_id', orderId)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
     setOrderDetails({
       ...detailedOrder,
       shipping_snapshot: snapshotData?.shipping_snapshot,
       billing_snapshot: snapshotData?.billing_snapshot ?? null,
+      shipping_label_id: labelData?.id ?? null,
+      shipping_label_url: labelData?.label_url ?? null,
+      shipping_label_status: labelData?.status ?? null,
     });
 
     const { data: itemsData, error: itemsError } = await supabase
@@ -721,8 +784,8 @@ const fetchOrderDetails = async (orderId: number) => {
         return;
       }
 
-      // Extraer product_image_mode (campo de UI, no existe en la tabla products)
-      const { product_image_mode, ...productFields } = newProduct;
+      // Extraer campos que no van en la tabla products (son de variantes o de UI)
+      const { product_image_mode, metal_type, carat, sku, stock, model, size, ...productFields } = newProduct;
 
       const { data: inserted, error } = await supabase
         .from('products')
@@ -753,26 +816,27 @@ const fetchOrderDetails = async (orderId: number) => {
 
       // Crear siempre una variante default (modelo principal); el SKU es del modelo principal
       if (inserted) {
+        const variantPayload = {
+          product_id: inserted.id,
+          name: newProduct.name,
+          model: model?.trim() || null,
+          size: size?.trim() || null,
+          price: newProduct.price,
+          original_price: newProduct.original_price,
+          stock: stock || 0,
+          is_default: true,
+          sku: sku?.trim() || null,
+          metal_type: metal_type ?? null,
+          carat: carat ?? null,
+          use_product_images: newProduct.product_image_mode === 'variant' ? false : true,
+          is_active: newProduct.is_active ?? true
+        };
+        console.log('[DEBUG] variant payload:', JSON.stringify(variantPayload));
         const { error: variantError } = await supabase
           .from('product_variants')
-          .insert([{
-            product_id: inserted.id,
-            name: newProduct.name,
-            price: newProduct.price,
-            original_price: newProduct.original_price,
-            stock: newProduct.stock || 0,
-            is_default: true,
-            sku: newProduct.sku?.trim() || null,
-            metal_type: newProduct.metal_type ?? null,
-            carat: newProduct.carat ?? null,
-            use_product_images: newProduct.product_image_mode === 'variant' ? false : true,
-            is_active: newProduct.is_active ?? true
-          }]);
+          .insert([variantPayload]);
 
-        if (variantError) {
-          console.error('Error creating default variant:', variantError);
-          // No lanzar error, solo loguear
-        }
+        if (variantError) throw variantError;
       }
 
       setNewProduct({
@@ -796,7 +860,9 @@ const fetchOrderDetails = async (orderId: number) => {
         is_active: true,
         metal_type: null,
         carat: undefined,
-        product_image_mode: 'base'
+        product_image_mode: 'base',
+        model: '',
+        size: ''
       });
       setShowAddProduct(false);
       setProductMainImageFile(null);
@@ -804,9 +870,10 @@ const fetchOrderDetails = async (orderId: number) => {
       setProductGalleryFiles(null);
       setProductGalleryPreviews([]);
       fetchProducts();
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error adding product:', error);
-      alert('Error al agregar el producto. Verifica que el nombre sea único y que todos los campos estén correctos.');
+      const msg = [error?.message, error?.details, error?.hint].filter(Boolean).join(' | ');
+      alert(`Error al agregar el producto: ${msg || JSON.stringify(error)}`);
     }
   };
 
@@ -861,7 +928,6 @@ const fetchOrderDetails = async (orderId: number) => {
           description: product.description,
           material: product.material,
           category_id: product.category_id,
-          stock: product.stock,
           in_stock: product.in_stock,
           is_new: product.is_new,
           is_featured: product.is_featured,
@@ -885,8 +951,6 @@ const fetchOrderDetails = async (orderId: number) => {
             name: product.name,
             price: product.price,
             original_price: product.original_price,
-            sku: (product as any).sku?.trim() || null,
-            stock: product.stock ?? 0,
             is_active: product.is_active ?? true,
             metal_type: (product as any).metal_type ?? null,
             carat: (product as any).carat ?? null,
@@ -1111,14 +1175,55 @@ const fetchOrderDetails = async (orderId: number) => {
 
   const handleDeleteVariant = async (variantId: number) => {
     try {
+      // 1. Verificar si otras variantes referencian las imágenes de esta variante
+      const { data: dependents } = await supabase
+        .from('product_variants')
+        .select('id, name')
+        .eq('image_reference_variant_id', variantId);
+
+      if (dependents && dependents.length > 0) {
+        const names = dependents.map((d: any) => d.name || `#${d.id}`).join('\n• ');
+        alert(
+          `No se puede eliminar esta variante porque otras variantes están usando sus imágenes:\n• ${names}\n\nCambia la fuente de imágenes en esas variantes primero y luego vuelve a intentarlo.`
+        );
+        return;
+      }
+
+      // 2. Obtener datos de la variante para limpiar Storage
+      const { data: variant } = await supabase
+        .from('product_variants')
+        .select('name, image')
+        .eq('id', variantId)
+        .single();
+
+      if (!confirm(`¿Eliminar variante "${variant?.name || variantId}"? Sus imágenes propias también serán eliminadas. Esta acción no se puede deshacer.`)) return;
+
+      // 3. Recopilar paths de Storage a eliminar (imagen propia + galería propia)
+      const pathsToDelete: string[] = [];
+      if (variant?.image) pathsToDelete.push(variant.image);
+
+      const { data: variantImages } = await supabase
+        .from('variant_images')
+        .select('url')
+        .eq('variant_id', variantId);
+      variantImages?.forEach((img: any) => { if (img.url) pathsToDelete.push(img.url); });
+
+      // 4. Eliminar la variante (cascade elimina filas de variant_images)
       const { error } = await supabase
         .from('product_variants')
         .delete()
         .eq('id', variantId);
       if (error) throw error;
+
+      // 5. Limpiar Storage (best effort, no bloquear si falla)
+      if (pathsToDelete.length > 0) {
+        await supabase.storage.from('products').remove(pathsToDelete);
+      }
+
       fetchProducts();
     } catch (error) {
       console.error('Error deleting variant:', error);
+      alert('Error al eliminar la variante.');
     }
   };
 
@@ -1161,29 +1266,67 @@ const fetchOrderDetails = async (orderId: number) => {
   };
 
   const handleDeleteProduct = async (productId: number) => {
-    if (!confirm('¿Estás seguro de que quieres eliminar este producto? Esta acción no se puede deshacer.')) return;
+    if (!confirm('¿Estás seguro de que quieres eliminar este producto?\nSe eliminarán todas sus imágenes. Esta acción no se puede deshacer.')) return;
 
     try {
-      // Verificar si el producto ha sido comprado
+      // 1. Verificar si el producto ha sido comprado
       const { data: orderItems, error: checkError } = await supabase
         .from('order_items')
         .select('id')
         .eq('product_id', productId)
         .limit(1);
-
       if (checkError) throw checkError;
-
       if (orderItems && orderItems.length > 0) {
         alert('No se puede eliminar este producto porque ya ha sido comprado. Puedes desactivarlo en su lugar.');
         return;
       }
 
+      // 2. Recopilar todos los paths de Storage a eliminar
+      const pathsToDelete: string[] = [];
+
+      // Imagen principal del producto
+      const { data: product } = await supabase
+        .from('products')
+        .select('image')
+        .eq('id', productId)
+        .single();
+      if (product?.image) pathsToDelete.push(product.image);
+
+      // Galería del producto
+      const { data: productImages } = await supabase
+        .from('product_images')
+        .select('url')
+        .eq('product_id', productId);
+      productImages?.forEach((img: any) => { if (img.url) pathsToDelete.push(img.url); });
+
+      // Imágenes propias de cada variante (imagen única + galería)
+      const { data: variants } = await supabase
+        .from('product_variants')
+        .select('id, image')
+        .eq('product_id', productId);
+
+      if (variants && variants.length > 0) {
+        variants.forEach((v: any) => { if (v.image) pathsToDelete.push(v.image); });
+
+        const variantIds = variants.map((v: any) => v.id);
+        const { data: variantImages } = await supabase
+          .from('variant_images')
+          .select('url')
+          .in('variant_id', variantIds);
+        variantImages?.forEach((img: any) => { if (img.url) pathsToDelete.push(img.url); });
+      }
+
+      // 3. Eliminar el producto (cascade elimina variantes, imágenes, etc.)
       const { error } = await supabase
         .from('products')
         .delete()
         .eq('id', productId);
-
       if (error) throw error;
+
+      // 4. Limpiar Storage (best effort)
+      if (pathsToDelete.length > 0) {
+        await supabase.storage.from('products').remove(pathsToDelete);
+      }
 
       fetchProducts();
       alert('Producto eliminado correctamente.');
@@ -1386,6 +1529,7 @@ const fetchOrderDetails = async (orderId: number) => {
       // Cada elemento es { order_id, label: {...} } o { order_id, error: {...} }
       // RPC puede devolver label como objeto o como array de un elemento
       const labelIds: number[] = [];
+      const labelOrderNumberMap: Record<number, string> = {};
       const createdLabels = createData?.createdLabels || [];
       const firstError: string[] = [];
 
@@ -1397,7 +1541,11 @@ const fetchOrderDetails = async (orderId: number) => {
         } else {
           const label = entry.label;
           const id = label?.id ?? (Array.isArray(label) ? label[0]?.id : null);
-          if (id) labelIds.push(Number(id));
+          if (id) {
+            labelIds.push(Number(id));
+            const matchedOrder = orders.find((o: any) => o.id === entry.order_id);
+            labelOrderNumberMap[Number(id)] = matchedOrder?.order_number || String(entry.order_id);
+          }
         }
       });
 
@@ -1436,6 +1584,7 @@ const fetchOrderDetails = async (orderId: number) => {
         const g = generatedGuides.find(x => x.label_id === labelId);
         return {
           label_id: labelId,
+          order_number: labelOrderNumberMap[labelId],
           label: g?.guide ? { id: labelId, tracking_code: g.guide.tracking_code, label_url: g.guide.label_url } : null,
           error: g?.error,
           guide: g?.guide,
@@ -1459,14 +1608,14 @@ const fetchOrderDetails = async (orderId: number) => {
     }
   };
 
-  const downloadPdfIndividual = async (labelId: number) => {
+  const downloadPdfIndividual = async (labelId: number, orderNumber?: string) => {
     try {
-      setShippingStatusMessage(`Descargando PDF de etiqueta ${labelId}...`);
+      const ref = orderNumber || labelId;
+      setShippingStatusMessage(`Descargando guía ${ref}...`);
       const token = (await supabase.auth.getSession()).data.session?.access_token;
       const headers: Record<string, string> = {};
       if (token) headers['Authorization'] = `Bearer ${token}`;
       const baseUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1`;
-      // El endpoint espera el parámetro 'id', no 'label_id'
       const resp = await fetch(`${baseUrl}/shipping-label-pdf?id=${labelId}`, {
         method: 'GET',
         headers
@@ -1485,7 +1634,7 @@ const fetchOrderDetails = async (orderId: number) => {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `shipping-label-${labelId}.pdf`;
+      a.download = `guia-${ref}.pdf`;
       a.click();
       URL.revokeObjectURL(url);
       setShippingStatusMessage('PDF descargado.');
@@ -2051,145 +2200,271 @@ const fetchOrderDetails = async (orderId: number) => {
         </div>
 
         {activeTab === 'dashboard' && (
-  <div className="space-y-6">
-    <div className="flex flex-wrap items-end gap-4">
-      <div>
-        <label className="block text-sm text-gray-300 mb-1">Desde</label>
-        <input
-          type="date"
-          value={dashboardDateFilter.startDate}
-          onChange={(e) => setDashboardDateFilter(prev => ({ ...prev, startDate: e.target.value }))}
-          className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white"
-        />
-      </div>
-      <div>
-        <label className="block text-sm text-gray-300 mb-1">Hasta</label>
-        <input
-          type="date"
-          value={dashboardDateFilter.endDate}
-          onChange={(e) => setDashboardDateFilter(prev => ({ ...prev, endDate: e.target.value }))}
-          className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white"
-        />
-      </div>
-      <button
-        onClick={() => fetchDashboardData({ ...dashboardDateFilter })}
-        className="px-4 py-2 bg-yellow-500 hover:bg-yellow-600 text-black rounded-lg"
-      >
-        Filtrar
-      </button>
-      {(dashboardDateFilter.startDate || dashboardDateFilter.endDate) && (
-        <button
-          onClick={() => {
-            setDashboardDateFilter({ startDate: '', endDate: '' });
-            fetchDashboardData({ startDate: '', endDate: '' });
-          }}
-          className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg"
-        >
-          Limpiar
-        </button>
-      )}
-    </div>
-    
+          <div className="space-y-5">
 
-    {/* 📊 Métricas principales */}
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-6">
-      {[
-        { title: 'Ventas Totales', value: `$${totalSales.toLocaleString()}`, color: 'from-green-900/30 to-green-800/30 border-green-500/30', icon: <TrendingUp className="h-8 w-8 text-green-400" /> },
-        { title: 'Órdenes Totales', value: totalOrders, color: 'from-blue-900/30 to-blue-800/30 border-blue-500/30', icon: <Package className="h-8 w-8 text-blue-400" /> },
-        { title: 'Clientes Únicos', value: uniqueCustomersValue, color: 'from-purple-900/30 to-purple-800/30 border-purple-500/30', icon: <Users className="h-8 w-8 text-purple-400" /> },
-        { title: 'Devoluciones', value: totalReturns, color: 'from-orange-900/30 to-orange-800/30 border-orange-500/30', icon: <RotateCcw className="h-8 w-8 text-orange-400" /> },
-        { title: 'Ganancia Joyero', value: `$${jewelerEarnings.toLocaleString()}`, color: 'from-yellow-900/30 to-yellow-800/30 border-yellow-500/30', icon: <Coins className="h-8 w-8 text-yellow-400" /> },
-        { title: 'Comisión Plataforma', value: `$${platformFees.toLocaleString()}`, color: 'from-teal-900/30 to-teal-800/30 border-teal-500/30', icon: <DollarSign className="h-8 w-8 text-teal-400" /> },
-      ].map((metric, i) => (
-        <motion.div
-          key={metric.title}
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: i * 0.1 }}
-          className={`bg-gradient-to-r ${metric.color} border rounded-lg p-6`}
-        >
-          <div className="grid grid-cols-5 gap-4 h-full">
-            {/* Columna para texto (4/5 del ancho) */}
-            <div className="col-span-4">
-              <p className="text-xs font-medium text-gray-300 mb-1">{metric.title}</p>
-              <p className="text-sm font-bold text-white truncate">{metric.value}</p>
-            </div>
-            
-            {/* Columna para icono (1/5 del ancho) - alineado al centro */}
-            <div className="col-span-1 flex items-center justify-center">
-              <div className="w-6 h-6 flex items-center justify-center bg-black/20 rounded-full">
-            {metric.icon}
+            {/* Filtros de fecha */}
+            <div className="bg-gray-800/50 border border-gray-700/50 rounded-xl p-4">
+              <p className="text-[10px] font-semibold uppercase tracking-widest text-gray-500 mb-3">Rango de fechas</p>
+              <div className="flex flex-wrap items-end gap-3">
+                <div>
+                  <label className="block text-xs text-gray-400 mb-1.5">Desde</label>
+                  <input
+                    type="date"
+                    value={dashboardDateFilter.startDate}
+                    onChange={(e) => setDashboardDateFilter(prev => ({ ...prev, startDate: e.target.value }))}
+                    className="bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-yellow-500/50"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-400 mb-1.5">Hasta</label>
+                  <input
+                    type="date"
+                    value={dashboardDateFilter.endDate}
+                    onChange={(e) => setDashboardDateFilter(prev => ({ ...prev, endDate: e.target.value }))}
+                    className="bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-yellow-500/50"
+                  />
+                </div>
+                <button
+                  onClick={() => fetchDashboardData({ ...dashboardDateFilter })}
+                  className="px-4 py-2 bg-yellow-500 hover:bg-yellow-400 text-black rounded-lg text-sm font-semibold transition-colors"
+                >
+                  Filtrar
+                </button>
+                {(dashboardDateFilter.startDate || dashboardDateFilter.endDate) && (
+                  <button
+                    onClick={() => {
+                      setDashboardDateFilter({ startDate: '', endDate: '' });
+                      fetchDashboardData({ startDate: '', endDate: '' });
+                    }}
+                    className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded-lg text-sm transition-colors"
+                  >
+                    Limpiar
+                  </button>
+                )}
               </div>
             </div>
-          </div>
-        </motion.div>
-      ))}
-    </div>
 
-    {/* 📈 Gráfico de evolución de ventas */}
-    <div className="bg-gray-800 rounded-lg p-6">
-      <h3 className="text-lg font-semibold text-white mb-4">Evolución de Ventas</h3>
-      <ResponsiveContainer width="100%" height={300}>
-        <LineChart data={dashboardData.salesSummary.slice().reverse()}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#444" />
-          <XAxis 
-            dataKey="date" 
-            stroke="#aaa"
-            tickFormatter={(dateStr, index) => {
-              const date = new Date(dateStr);
-              const dataLength = dashboardData.salesSummary.length;
-              
-              // Determinar si mostrar esta etiqueta
-              let shouldShow = false;
-              
-              if (dataLength <= 10) {
-                shouldShow = true; // Mostrar todas si son pocas
-              } else if (dataLength <= 20) {
-                shouldShow = index % 2 === 0; // Mostrar cada 2da
-              } else if (dataLength <= 30) {
-                shouldShow = index % 3 === 0; // Mostrar cada 3ra
-              } else {
-                shouldShow = index % Math.ceil(dataLength / 8) === 0; // Máximo 8
-              }
-              
-              if (shouldShow) {
-                return date.toLocaleDateString('es-ES', { 
-                  month: 'numeric', 
-                  day: 'numeric' 
-                });
-              }
-              return '';
-            }}
-            tick={{ fontSize: 11 }}
-            interval={0} // Importante: desactivar intervalo automático
-            height={40}
-          />
-          <YAxis stroke="#aaa" />
-          <Tooltip 
-            contentStyle={{ backgroundColor: '#1f2937', border: 'none' }}
-            formatter={(value, name) => {
-              const nameMap: Record<string, string> = {
-                total_sales: 'Ventas',
-                total_orders: 'Pedidos'
-              };
-              return [value, nameMap[name as string] || name];
-            }}
-            labelFormatter={(dateStr) => {
-              const date = new Date(dateStr);
-              return date.toLocaleDateString('es-ES', { 
-                year: 'numeric',
-                month: 'long', 
-                day: 'numeric' 
-              });
-            }}
-          />
-          <Line type="monotone" dataKey="total_sales" stroke="#22c55e" strokeWidth={2} dot={false} />
-          <Line type="monotone" dataKey="total_orders" stroke="#3b82f6" strokeWidth={2} dot={false} />
-        </LineChart>
-      </ResponsiveContainer>
-    </div>
-  </div>
-)}
+            {/* Métricas principales */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              {[
+                {
+                  title: 'Ventas Totales',
+                  value: new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 0 }).format(totalSales),
+                  sub: `${totalOrders} órdenes`,
+                  color: 'border-green-500/20 bg-green-500/5',
+                  iconBg: 'bg-green-500/10',
+                  iconColor: 'text-green-400',
+                  icon: <TrendingUp className="h-5 w-5" />,
+                },
+                {
+                  title: 'Órdenes',
+                  value: totalOrders.toLocaleString(),
+                  sub: `${totalReturns} devoluciones`,
+                  color: 'border-blue-500/20 bg-blue-500/5',
+                  iconBg: 'bg-blue-500/10',
+                  iconColor: 'text-blue-400',
+                  icon: <Package className="h-5 w-5" />,
+                },
+                {
+                  title: 'Clientes Únicos',
+                  value: uniqueCustomersValue.toLocaleString(),
+                  sub: 'compradores',
+                  color: 'border-purple-500/20 bg-purple-500/5',
+                  iconBg: 'bg-purple-500/10',
+                  iconColor: 'text-purple-400',
+                  icon: <Users className="h-5 w-5" />,
+                },
+                {
+                  title: 'Devoluciones',
+                  value: totalReturns.toLocaleString(),
+                  sub: 'totales',
+                  color: 'border-orange-500/20 bg-orange-500/5',
+                  iconBg: 'bg-orange-500/10',
+                  iconColor: 'text-orange-400',
+                  icon: <RotateCcw className="h-5 w-5" />,
+                },
+              ].map((metric, i) => (
+                <motion.div
+                  key={metric.title}
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: i * 0.07 }}
+                  className={`border ${metric.color} rounded-xl p-4 flex items-center gap-4`}
+                >
+                  <div className={`w-10 h-10 rounded-xl ${metric.iconBg} flex items-center justify-center flex-shrink-0 ${metric.iconColor}`}>
+                    {metric.icon}
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-[10px] font-medium text-gray-500 uppercase tracking-wide mb-0.5">{metric.title}</p>
+                    <p className="text-lg font-bold text-white leading-none truncate">{metric.value}</p>
+                    <p className="text-[10px] text-gray-600 mt-0.5">{metric.sub}</p>
+                  </div>
+                </motion.div>
+              ))}
+            </div>
+
+            {/* Gráfico de evolución */}
+            <div className="bg-gray-800/50 border border-gray-700/50 rounded-xl p-5">
+              <div className="flex items-center gap-3 mb-5">
+                <div className="w-7 h-7 rounded-lg bg-green-500/10 flex items-center justify-center">
+                  <TrendingUp className="w-4 h-4 text-green-400" />
+                </div>
+                <h3 className="text-sm font-bold text-white">Evolución de Ventas</h3>
+                <div className="ml-auto flex items-center gap-4 text-[10px] text-gray-500">
+                  <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 bg-green-500 inline-block rounded" /> Ventas</span>
+                  <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 bg-blue-500 inline-block rounded" /> Pedidos</span>
+                </div>
+              </div>
+              <ResponsiveContainer width="100%" height={260}>
+                <LineChart data={dashboardData.salesSummary.slice().reverse()}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                  <XAxis
+                    dataKey="date"
+                    stroke="#6b7280"
+                    tickFormatter={(dateStr, index) => {
+                      const date = new Date(dateStr);
+                      const dataLength = dashboardData.salesSummary.length;
+                      let shouldShow = false;
+                      if (dataLength <= 10) shouldShow = true;
+                      else if (dataLength <= 20) shouldShow = index % 2 === 0;
+                      else if (dataLength <= 30) shouldShow = index % 3 === 0;
+                      else shouldShow = index % Math.ceil(dataLength / 8) === 0;
+                      if (shouldShow) return date.toLocaleDateString('es-ES', { month: 'numeric', day: 'numeric' });
+                      return '';
+                    }}
+                    tick={{ fontSize: 10, fill: '#9ca3af' }}
+                    interval={0}
+                    height={36}
+                  />
+                  <YAxis stroke="#6b7280" tick={{ fontSize: 10, fill: '#9ca3af' }} />
+                  <Tooltip
+                    contentStyle={{ backgroundColor: '#111827', border: '1px solid #374151', borderRadius: '8px', fontSize: '12px' }}
+                    formatter={(value, name) => {
+                      const nameMap: Record<string, string> = { total_sales: 'Ventas', total_orders: 'Pedidos' };
+                      return [value, nameMap[name as string] || name];
+                    }}
+                    labelFormatter={(dateStr) => new Date(dateStr).toLocaleDateString('es-ES', { year: 'numeric', month: 'long', day: 'numeric' })}
+                  />
+                  <Line type="monotone" dataKey="total_sales" stroke="#22c55e" strokeWidth={2} dot={false} />
+                  <Line type="monotone" dataKey="total_orders" stroke="#3b82f6" strokeWidth={2} dot={false} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+
+            {/* Configuración de Tienda */}
+            <div className="bg-gray-800/50 border border-gray-700/50 rounded-xl p-5">
+              <div className="flex items-center gap-3 mb-5">
+                <div className="w-7 h-7 rounded-lg bg-yellow-400/10 flex items-center justify-center">
+                  <Settings className="w-4 h-4 text-yellow-400" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-white">Configuración de Tienda</h3>
+                  <p className="text-[10px] text-gray-500 mt-0.5">Parámetros de envío aplicados en checkout y emails</p>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+                <div>
+                  <label className="block text-xs text-gray-400 mb-1.5 font-medium">
+                    Monto mínimo para envío gratis <span className="text-gray-600">(MXN)</span>
+                  </label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm">$</span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="100"
+                      value={storeSettings.free_shipping_threshold}
+                      onChange={(e) => setStoreSettings(prev => ({ ...prev, free_shipping_threshold: e.target.value }))}
+                      className="w-full bg-gray-900 border border-gray-700 rounded-lg pl-7 pr-4 py-2.5 text-sm text-white focus:outline-none focus:border-yellow-500/50 transition-colors"
+                    />
+                  </div>
+                  <p className="text-[10px] text-gray-600 mt-1">Órdenes iguales o mayores a este monto no pagan envío</p>
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-400 mb-1.5 font-medium">
+                    Costo de envío estándar <span className="text-gray-600">(MXN)</span>
+                  </label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm">$</span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="10"
+                      value={storeSettings.standard_shipping_cost}
+                      onChange={(e) => setStoreSettings(prev => ({ ...prev, standard_shipping_cost: e.target.value }))}
+                      className="w-full bg-gray-900 border border-gray-700 rounded-lg pl-7 pr-4 py-2.5 text-sm text-white focus:outline-none focus:border-yellow-500/50 transition-colors"
+                    />
+                  </div>
+                  <p className="text-[10px] text-gray-600 mt-1">Aplicado cuando no hay cotización de paquetería disponible</p>
+                </div>
+              </div>
+              {/* Días como producto nuevo */}
+              <div className="mb-4">
+                <label className="block text-xs text-gray-400 mb-1.5 font-medium">
+                  Duración de etiqueta <span className="text-yellow-400 font-semibold">NUEVO</span> <span className="text-gray-600">(días)</span>
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={storeSettings.new_product_days}
+                  onChange={(e) => setStoreSettings(prev => ({ ...prev, new_product_days: e.target.value }))}
+                  className="w-40 bg-gray-900 border border-gray-700 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none focus:border-yellow-500/50 transition-colors"
+                />
+                <p className="text-[10px] text-gray-600 mt-1">
+                  Al activar "Nuevo" en un producto, la etiqueta NUEVO desaparece automáticamente tras este número de días.
+                </p>
+              </div>
+
+              {/* Paquetería por defecto */}
+              <div className="mb-4 p-3 bg-gray-900/60 border border-gray-700/50 rounded-lg">
+                <label className="block text-xs text-gray-400 mb-1.5 font-medium">
+                  Paquetería por defecto <span className="text-gray-600">— para órdenes sin cotización</span>
+                </label>
+                <select
+                  value={storeSettings.default_courier_id}
+                  onChange={(e) => setStoreSettings(prev => ({ ...prev, default_courier_id: e.target.value }))}
+                  className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-yellow-500/50 transition-colors"
+                >
+                  <option value="">— Sin paquetería por defecto —</option>
+                  {couriers.filter(c => (c as any).active !== false).map(c => (
+                    <option key={c.id} value={String(c.id)}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-[10px] text-gray-600 mt-1">
+                  Cuando el cliente no recibió cotización de envío, se usará esta paquetería para generar la guía. Su configuración de servicio debe estar en el panel de Paqueterías.
+                </p>
+              </div>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={saveStoreSettings}
+                  disabled={savingSettings}
+                  className="flex items-center gap-2 px-4 py-2 bg-yellow-500 hover:bg-yellow-400 disabled:opacity-50 text-black rounded-lg text-sm font-semibold transition-colors"
+                >
+                  {savingSettings ? (
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Save className="w-3.5 h-3.5" />
+                  )}
+                  {savingSettings ? 'Guardando...' : 'Guardar configuración'}
+                </button>
+                {settingsSaved && (
+                  <motion.span
+                    initial={{ opacity: 0, x: -4 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    className="flex items-center gap-1.5 text-green-400 text-xs font-medium"
+                  >
+                    <CheckCircle className="w-3.5 h-3.5" />
+                    Guardado
+                  </motion.span>
+                )}
+              </div>
+            </div>
+
+          </div>
+        )}
 
 
         {activeTab === 'products' && (
@@ -2223,9 +2498,34 @@ const fetchOrderDetails = async (orderId: number) => {
                     const isExpanded = expandedProducts.has(product.id);
 
                     return (
-                      <div key={product.id} className="bg-gray-800 rounded-xl border border-gray-700/60 overflow-hidden">
+                      <div key={product.id} className="relative bg-gray-800 rounded-xl border border-gray-700/60 overflow-hidden">
+
+                        {/* ── Esquina sup. izquierda: NUEVO ── */}
+                        {isProductNew(product) && (
+                          <div className="absolute top-2 left-2 z-10">
+                            <span className="inline-flex items-center gap-1 text-[9px] font-bold px-2 py-0.5 rounded-full bg-emerald-500 text-white border border-emerald-400/40 shadow-[0_0_8px_rgba(52,211,153,0.35)] backdrop-blur-sm">
+                              <Sparkles className="h-2.5 w-2.5" />
+                              NUEVO
+                            </span>
+                          </div>
+                        )}
+
+                        {/* ── Esquina sup. derecha: ACTIVO / INACTIVO ── */}
+                        <div className="absolute top-2 right-2 z-10">
+                          <span className={`inline-flex items-center gap-1.5 text-[9px] font-bold px-2 py-0.5 rounded-full border transition-colors duration-200 ${
+                            product.is_active !== false
+                              ? 'bg-green-500/10 text-green-400 border-green-500/30 shadow-[0_0_6px_rgba(74,222,128,0.15)]'
+                              : 'bg-gray-700/60 text-gray-500 border-gray-600/40'
+                          }`}>
+                            <span className={`h-1.5 w-1.5 rounded-full flex-shrink-0 ${
+                              product.is_active !== false ? 'bg-green-400 animate-pulse' : 'bg-gray-600'
+                            }`} />
+                            {product.is_active !== false ? 'Activo' : 'Inactivo'}
+                          </span>
+                        </div>
+
                         {/* Cabecera del producto */}
-                        <div className="flex items-center gap-3 p-3 sm:p-4">
+                        <div className="flex items-center gap-3 px-3 sm:px-4 pb-3 sm:pb-4 pt-7">
                           <div className="flex-shrink-0 w-14 h-14 rounded-lg overflow-hidden border border-gray-700 bg-gray-900">
                             {isVideoUrl(product.image) ? (
                               <video src={buildMediaUrl(product.image)} className="w-full h-full object-cover" muted playsInline />
@@ -2234,13 +2534,14 @@ const fetchOrderDetails = async (orderId: number) => {
                             )}
                           </div>
                           <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 flex-wrap">
+                            <div className="flex items-center gap-1.5 flex-wrap">
                               <span className="font-semibold text-white text-sm">{product.name}</span>
-                              {product.is_new && <span className="text-[9px] bg-green-600 text-white px-1.5 py-0.5 rounded-full font-bold">NUEVO</span>}
-                              {product.is_featured && <span className="text-[9px] bg-gray-300 text-black px-1.5 py-0.5 rounded-full font-bold">DEST.</span>}
-                              <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${product.is_active !== false ? 'bg-green-500/15 text-green-400' : 'bg-red-500/15 text-red-400'}`}>
-                                {product.is_active !== false ? 'Activo' : 'Inactivo'}
-                              </span>
+                              {product.is_featured && (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full border bg-yellow-400/10 text-yellow-400 border-yellow-400/25">
+                                  <Star className="h-2.5 w-2.5 fill-current" />
+                                  Destacado
+                                </span>
+                              )}
                             </div>
                             <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                               <span className="text-xs text-gray-400">{categories.find(c => c.id === product.category_id)?.name || 'Sin categoría'}</span>
@@ -3169,6 +3470,18 @@ const fetchOrderDetails = async (orderId: number) => {
                       placeholder="Nombre del producto" />
                   </div>
                   <div>
+                    <label className="block text-gray-400 mb-1 text-xs font-medium uppercase tracking-wide">Modelo (nombre del modelo)</label>
+                    <input type="text" value={newProduct.model || ''} onChange={(e) => setNewProduct({ ...newProduct, model: e.target.value })}
+                      className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:border-yellow-400/50 focus:outline-none transition-colors"
+                      placeholder="Ej: Dorado, Clásico..." />
+                  </div>
+                  <div>
+                    <label className="block text-gray-400 mb-1 text-xs font-medium uppercase tracking-wide">Talla / Tamaño</label>
+                    <input type="text" value={newProduct.size || ''} onChange={(e) => setNewProduct({ ...newProduct, size: e.target.value })}
+                      className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:border-yellow-400/50 focus:outline-none transition-colors"
+                      placeholder="Ej: S, M, 15cm..." />
+                  </div>
+                  <div>
                     <label className="block text-gray-400 mb-1 text-xs font-medium uppercase tracking-wide">Categoría</label>
                     <select value={newProduct.category_id} onChange={(e) => setNewProduct({ ...newProduct, category_id: parseInt(e.target.value) || 1 })}
                       className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:border-yellow-400/50 focus:outline-none transition-colors">
@@ -3623,11 +3936,6 @@ const fetchOrderDetails = async (orderId: number) => {
                     <input type="number" value={editingProduct.original_price || ''} onChange={(e) => setEditingProduct({ ...editingProduct, original_price: parseFloat(e.target.value) || undefined })}
                       className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:border-yellow-400/50 focus:outline-none transition-colors" placeholder="0.00" />
                   </div>
-                  <div>
-                    <label className="block text-gray-400 mb-1 text-xs font-medium uppercase tracking-wide">Stock</label>
-                    <input type="number" value={editingProduct.stock || 0} onChange={(e) => setEditingProduct({ ...editingProduct, stock: parseInt(e.target.value) || 0 })}
-                      className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:border-yellow-400/50 focus:outline-none transition-colors" placeholder="0" />
-                  </div>
                 </div>
               </div>
 
@@ -3756,6 +4064,15 @@ const fetchOrderDetails = async (orderId: number) => {
                       </label>
                     ))}
                   </div>
+                  {/* Fecha de expiración de "Nuevo" */}
+                  {editingProduct.is_new && (editingProduct as any).new_until && (
+                    <p className={`text-[10px] mt-1.5 ${isProductNew(editingProduct) ? 'text-green-500' : 'text-red-400'}`}>
+                      {isProductNew(editingProduct)
+                        ? `Etiqueta NUEVO expira el ${new Date((editingProduct as any).new_until).toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' })}`
+                        : `Etiqueta NUEVO expiró el ${new Date((editingProduct as any).new_until).toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' })}`
+                      }
+                    </p>
+                  )}
                 </div>
               </div>
 
@@ -4810,10 +5127,6 @@ const fetchOrderDetails = async (orderId: number) => {
                     <span className="text-white font-medium">{productDetails.material || 'N/A'}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-gray-300">Stock:</span>
-                    <span className="text-white font-medium">{productDetails.stock || 0}</span>
-                  </div>
-                  <div className="flex justify-between">
                     <span className="text-gray-300">Peso:</span>
                     <span className="text-white font-medium">{productDetails.weight_grams || 100} g</span>
                   </div>
@@ -4971,6 +5284,7 @@ const fetchOrderDetails = async (orderId: number) => {
                   </div>
                   <div className="bg-gray-800/50 rounded-xl border border-gray-700/50 divide-y divide-gray-700/40">
                     {([
+                      { label: 'N° de orden', value: `#${orderDetails.order_number || orderDetails.order_id}` },
                       { label: 'Estado', value: orderDetails.status ? orderDetails.status.charAt(0).toUpperCase() + orderDetails.status.slice(1) : '—' },
                       { label: 'Total', value: `$${orderDetails.total?.toFixed(2)}` },
                       { label: 'Paquetería', value: orderDetails.courier_name || 'Sin asignar' },
@@ -5126,17 +5440,28 @@ const fetchOrderDetails = async (orderId: number) => {
                           <p className="text-xs text-gray-500 mt-0.5">{orderDetails.courier_name}</p>
                         )}
                       </div>
-                      {orderDetails.courier_url && (
-                        <a
-                          href={`${orderDetails.courier_url}${orderDetails.tracking_code}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="flex-shrink-0 flex items-center gap-1.5 text-xs text-yellow-400 hover:text-yellow-300 transition-colors px-3 py-1.5 bg-yellow-500/10 hover:bg-yellow-500/20 rounded-lg border border-yellow-500/20"
-                        >
-                          <Truck className="h-3.5 w-3.5" />
-                          Rastrear
-                        </a>
-                      )}
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        {orderDetails.shipping_label_id && (
+                          <button
+                            onClick={() => downloadPdfIndividual(orderDetails.shipping_label_id, orderDetails.order_number)}
+                            className="flex items-center gap-1.5 text-xs text-gray-300 hover:text-white transition-colors px-3 py-1.5 bg-gray-700/80 hover:bg-gray-600 rounded-lg border border-gray-600/50"
+                          >
+                            <Download className="h-3.5 w-3.5" />
+                            Descargar guía
+                          </button>
+                        )}
+                        {orderDetails.courier_url && (
+                          <a
+                            href={`${orderDetails.courier_url}${orderDetails.tracking_code}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex items-center gap-1.5 text-xs text-yellow-400 hover:text-yellow-300 transition-colors px-3 py-1.5 bg-yellow-500/10 hover:bg-yellow-500/20 rounded-lg border border-yellow-500/20"
+                          >
+                            <Truck className="h-3.5 w-3.5" />
+                            Rastrear
+                          </a>
+                        )}
+                      </div>
                     </div>
 
                     {cancelGuideState === 'idle' && (
@@ -5335,13 +5660,13 @@ const fetchOrderDetails = async (orderId: number) => {
                   return (
                     <div key={labelId} className="flex items-center justify-between bg-gray-700 rounded px-3 py-2 text-sm text-gray-200">
                       <div>
-                        <div>Etiqueta ID: {labelId}</div>
+                        <div>Orden #{pl.order_number || labelId}</div>
                         <div className="text-xs text-gray-400">
                           Tracking: {trackingNumber}
                         </div>
                       </div>
                       <button
-                        onClick={() => downloadPdfIndividual(Number(labelId))}
+                        onClick={() => downloadPdfIndividual(Number(labelId), pl.order_number)}
                         className="text-yellow-400 hover:text-yellow-300 text-xs underline"
                       >
                         PDF individual

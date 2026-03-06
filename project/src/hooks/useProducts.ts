@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import type { Product, Category, MetalType } from '../types';
+import { isProductNew } from '../utils/product';
 
 export const useProducts = () => {
   const [products, setProducts] = useState<Product[]>([]);
@@ -153,7 +154,7 @@ export const useProducts = () => {
             
             if (hasOffer) return 1;
             if (p.is_featured) return 2;
-            if (p.is_new) return 3;
+            if (isProductNew(p)) return 3;
             return 4;
           };
           return getPriority(a) - getPriority(b);

@@ -23,6 +23,7 @@ export interface Product {
   material?: string;
   in_stock?: boolean;
   is_new?: boolean;
+  new_until?: string;
   is_featured?: boolean;
   is_active?: boolean;
   created_at?: string;

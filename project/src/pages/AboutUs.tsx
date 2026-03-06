@@ -1,4 +1,5 @@
 import React from 'react';
+import { Star, Shield, Truck, RefreshCw } from 'lucide-react';
 
 const AboutUs: React.FC = () => {
 
@@ -7,37 +8,32 @@ const AboutUs: React.FC = () => {
       <div className="max-w-5xl mx-auto space-y-12">
         <header className="text-center space-y-4">
           <p className="text-sm tracking-[0.3em] text-yellow-400 uppercase">Nuestra historia</p>
-          <h1 className="text-4xl md:text-5xl font-bold text-white">Joyas con legado, corazón y precisión</h1>
+          <h1 className="text-4xl md:text-5xl font-bold text-white">Más de una década vistiendo a Mexicali</h1>
           <p className="text-gray-300 max-w-3xl mx-auto">
-            Desde hace cuatro décadas acompañamos compromisos, logros y nuevos comienzos. Cada pieza
-            está diseñada en Mexicali con materiales certificados y un proceso artesanal que honra la tradición.
+            En Joyería Orlando nos dedicamos a ofrecer las mejores piezas de joyería chapada en oro a precios accesibles.
+            Con más de 10 años de experiencia en el mercado de Mexicali, hemos crecido gracias a la confianza de nuestros clientes.
+          </p>
+          <p className="text-gray-300 max-w-3xl mx-auto">
+            Contamos con dos sucursales estratégicamente ubicadas en el Boulevard Lázaro Cárdenas, para que siempre nos tengas cerca.
+            Nuestro compromiso es brindarte joyería de calidad que se vea y se sienta como oro de verdad.
           </p>
         </header>
 
-        <section className="grid md:grid-cols-2 gap-8">
-          <div className="bg-gray-900/70 border border-gray-800 rounded-2xl p-6 space-y-4">
-            <h2 className="text-2xl font-semibold text-white">Visión</h2>
-            <p className="text-gray-300">
-              Crear joyería que conecte generaciones con diseños atemporales, materiales nobles
-              y una experiencia de compra cercana, honesta y personalizada.
-            </p>
-          </div>
-          <div className="bg-gray-900/70 border border-gray-800 rounded-2xl p-6 space-y-4">
-            <h2 className="text-2xl font-semibold text-white">Valores</h2>
-            <ul className="space-y-2 text-gray-300">
-              <li>• Artesanía responsable y trazable.</li>
-              <li>• Atención cálida antes, durante y después de la compra.</li>
-              <li>• Innovación para personalizar cada historia.</li>
-            </ul>
-          </div>
-        </section>
-
-        <section className="text-center space-y-4 bg-gray-900/70 border border-gray-800 rounded-2xl p-8">
-          <h2 className="text-2xl font-semibold text-white">Tu historia merece un brillo único</h2>
-          <p className="text-gray-300 max-w-3xl mx-auto">
-            Agenda una asesoría virtual o visítanos en el showroom para descubrir piezas únicas, personalizar
-            un diseño desde cero o restaurar una joya que deseas seguir heredando.
-          </p>
+        <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          {[
+            { title: 'Calidad Premium', desc: 'Chapado en oro de alta calidad con acabados que perduran en el tiempo.', icon: <Star className="h-5 w-5" /> },
+            { title: 'Garantía de Satisfacción', desc: 'Todas nuestras piezas cuentan con garantía. Tu satisfacción es nuestra prioridad.', icon: <Shield className="h-5 w-5" /> },
+            { title: 'Envíos a Todo México', desc: 'Recibe tu joyería en la puerta de tu casa. Envíos rápidos y seguros.', icon: <Truck className="h-5 w-5" /> },
+            { title: 'Cambios y Devoluciones', desc: 'Política flexible de cambios para que compres con total confianza.', icon: <RefreshCw className="h-5 w-5" /> },
+          ].map(({ title, desc, icon }) => (
+            <div key={title} className="bg-gray-900/70 border border-gray-800 rounded-2xl p-6 space-y-3">
+              <div className="w-10 h-10 rounded-xl bg-yellow-400/10 border border-yellow-400/20 flex items-center justify-center text-yellow-400">
+                {icon}
+              </div>
+              <h2 className="text-base font-semibold text-yellow-400">{title}</h2>
+              <p className="text-gray-300 text-sm">{desc}</p>
+            </div>
+          ))}
         </section>
 
         {/* Nuestras Sucursales */}

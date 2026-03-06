@@ -19,9 +19,9 @@ const Hero: React.FC<HeroProps> = ({ onShopNow }) => {
       {/* Imagen de fondo */}
       <div className="absolute inset-0">
         <img
-          src="https://images.pexels.com/photos/1191531/pexels-photo-1191531.jpeg?auto=compress&cs=tinysrgb&w=1920"
+          src="/images/hero-jewelry.jpg"
           alt="Luxury jewelry"
-          className="w-full h-full object-cover opacity-60"
+          className="w-full h-full object-cover"
         />
         <div className="absolute inset-0 bg-gradient-to-r from-black via-black/60 to-black/10" />
         <div className="absolute inset-0 bg-gradient-to-t from-black via-transparent to-black/30" />

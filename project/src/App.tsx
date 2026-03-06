@@ -31,6 +31,8 @@ import TermsOfService from './pages/TermsOfService';
 import ReturnsPolicy from './pages/ReturnsPolicy';
 import InvoiceHelp from './pages/InvoiceHelp';
 import FavoritesPage from './pages/FavoritesPage';
+import ContactPage from './pages/ContactPage';
+import JewelryTicker from './components/JewelryTicker';
 
 
 function App() {
@@ -208,6 +210,30 @@ function App() {
         <Route path="/" element={
           <main>
             {showHero && <Hero onShopNow={handleShopNow} />}
+
+            <JewelryTicker />
+
+            {/* Sección promo */}
+            <section className="relative overflow-hidden mx-4 sm:mx-8 lg:mx-auto lg:max-w-6xl my-8 rounded-2xl">
+              <img
+                src="/images/promo-banner.jpg"
+                alt="Promoción especial"
+                className="w-full h-80 sm:h-[28rem] object-cover"
+              />
+              <div className="absolute inset-0 bg-gradient-to-r from-black/80 via-black/50 to-transparent rounded-2xl" />
+              <div className="absolute inset-0 flex flex-col justify-center px-8 sm:px-12 lg:px-16">
+                <p className="text-xs tracking-[0.35em] text-yellow-400 uppercase font-semibold mb-2">
+                  Oferta especial
+                </p>
+                <h2 className="text-3xl sm:text-4xl lg:text-5xl font-bold text-white mb-3 leading-tight">
+                  Hasta 30% de descuento<br className="hidden sm:block" /> en piezas seleccionadas
+                </h2>
+                <p className="text-gray-300 text-sm sm:text-base max-w-md leading-relaxed">
+                  Visita cualquiera de nuestras dos sucursales en Mexicali y aprovecha esta promoción por tiempo limitado.
+                </p>
+              </div>
+            </section>
+
             <ProductGrid
               products={filteredProducts}
               onAddToCart={handleAddToCart}
@@ -278,6 +304,7 @@ function App() {
         <Route path="/terminos" element={<TermsOfService />} />
         <Route path="/devoluciones" element={<ReturnsPolicy />} />
         <Route path="/factura-tu-compra" element={<InvoiceHelp />} />
+        <Route path="/contacto" element={<ContactPage />} />
       </Routes>
 
       <Cart

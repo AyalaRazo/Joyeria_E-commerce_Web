@@ -36,10 +36,11 @@ const Header: React.FC<HeaderProps> = ({
 
   const categories = [
     { id: 'all', name: 'Todo' },
-    { id: 'rings', name: 'Anillos' },
-    { id: 'necklaces', name: 'Collares' },
-    { id: 'bracelets', name: 'Pulseras' },
-    { id: 'earrings', name: 'Pendientes' }
+    { id: 'Anillos', name: 'Anillos' },
+    { id: 'Collares', name: 'Collares' },
+    { id: 'Pulseras', name: 'Pulseras' },
+    { id: 'Aretes', name: 'Aretes' },
+    { id: 'Dijes', name: 'Dijes' }
   ];
 
   const trackCategoryView = (categoryId: string) => {

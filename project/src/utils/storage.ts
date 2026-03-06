@@ -68,7 +68,7 @@ export const isVideoUrl = (url: string): boolean => {
   return videoExtensions.some(ext => urlLower.endsWith(ext));
 };
 
-// Mapeo de categorías en inglés a español para las carpetas
+// Mapeo de categorías a nombre de carpeta
 const categoryFolderMap: Record<string, string> = {
   'rings': 'anillos',
   'ring': 'anillos',
@@ -76,12 +76,14 @@ const categoryFolderMap: Record<string, string> = {
   'necklace': 'collares',
   'bracelets': 'pulseras',
   'bracelet': 'pulseras',
-  'earrings': 'pendientes',
-  'earring': 'pendientes',
-  'pendientes': 'pendientes',
+  'earrings': 'aretes',
+  'earring': 'aretes',
+  'pendientes': 'aretes',
   'anillos': 'anillos',
   'collares': 'collares',
-  'pulseras': 'pulseras'
+  'pulseras': 'pulseras',
+  'aretes': 'aretes',
+  'dijes': 'dijes'
 };
 
 // Función para normalizar texto: quitar acentos y caracteres especiales
@@ -123,7 +125,7 @@ export const uploadImageToProductsBucket = async (
 
   const { error } = await supabase.storage
     .from('products')
-    .upload(path, file, { upsert: false, cacheControl: '3600' });
+    .upload(path, file, { upsert: true, cacheControl: '3600' });
 
   if (error) {
     throw error;
@@ -150,7 +152,7 @@ export const uploadVideoToProductsBucket = async (
 
   const { error } = await supabase.storage
     .from('products')
-    .upload(path, file, { upsert: false, cacheControl: '86400' });
+    .upload(path, file, { upsert: true, cacheControl: '86400' });
 
   if (error) {
     throw error;
@@ -169,8 +171,8 @@ export const getVariantFirstImage = async (
   productImage: string | null | undefined,
   useProductImages?: boolean
 ): Promise<string | null> => {
-  // Si no hay variant_id, usar imagen del producto
-  if (!variantId) {
+  // Si no hay variant_id válido, usar imagen del producto
+  if (!variantId || !Number.isInteger(variantId) || variantId <= 0) {
     return productImage || null;
   }
   
@@ -180,12 +182,13 @@ export const getVariantFirstImage = async (
   }
   
   try {
+    console.log('[DEBUG] get_variant_images called with:', variantId, typeof variantId);
     const { data, error } = await supabase.rpc('get_variant_images', {
       p_variant_id: variantId
     });
-    
+
     if (error) {
-      console.error('Error fetching variant image:', error);
+      console.error('Error fetching variant image (id=' + variantId + '):', error);
       return productImage || null;
     }
     

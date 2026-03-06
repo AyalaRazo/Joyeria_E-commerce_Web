@@ -772,6 +772,10 @@ const fetchOrderDetails = async (orderId: number) => {
         alert('El nombre del producto es requerido.');
         return;
       }
+      if (!newProduct.size?.trim()) {
+        alert('La talla es requerida para el modelo principal.');
+        return;
+      }
 
       // Upload main image if provided
       let mainImageUrl = newProduct.image;
@@ -3476,7 +3480,7 @@ const fetchOrderDetails = async (orderId: number) => {
                       placeholder="Ej: Dorado, Clásico..." />
                   </div>
                   <div>
-                    <label className="block text-gray-400 mb-1 text-xs font-medium uppercase tracking-wide">Talla / Tamaño</label>
+                    <label className="block text-gray-400 mb-1 text-xs font-medium uppercase tracking-wide">Talla / Tamaño <span className="text-rose-400">*</span></label>
                     <input type="text" value={newProduct.size || ''} onChange={(e) => setNewProduct({ ...newProduct, size: e.target.value })}
                       className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:border-yellow-400/50 focus:outline-none transition-colors"
                       placeholder="Ej: S, M, 15cm..." />

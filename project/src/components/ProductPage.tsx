@@ -938,12 +938,9 @@ const ProductPage: React.FC = () => {
                 .map((v: ProductVariant) => v.model)
                 .filter(Boolean))];
 
-              const defaultVariants = product.variants.filter((v: ProductVariant) =>
-                v.is_default === true && v.is_active !== false
-              );
-              const hasDefaultSizes = defaultVariants.some((v: ProductVariant) => v.size);
+              const hasAnySizes = product.variants.some((v: ProductVariant) => v.is_active !== false && v.size);
 
-              if (availableModels.length === 0 && !hasDefaultSizes) return null;
+              if (availableModels.length === 0 && !defaultVariantWithModel && !hasAnySizes) return null;
 
               // Variantes del modelo actualmente seleccionado
               const currentModel = selectedModel || '';

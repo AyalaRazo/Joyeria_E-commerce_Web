@@ -15,8 +15,7 @@ const Footer: React.FC = () => {
               </h1>
             </div>
             <p className="text-gray-300 text-xs leading-relaxed mb-3 max-w-md">
-              Desde 1985, creamos joyas excepcionales que trascienden el tiempo. 
-              Cada pieza es una obra de arte única.
+              La mejor joyería chapada en oro a precios accesibles en Mexicali, Baja California. Más de 10 años brindando elegancia y calidad.
             </p>
             <div className="flex space-x-2">
               <a href="https://www.instagram.com" className="p-1.5 bg-gray-800 hover:bg-gray-300 hover:text-black rounded transition-all duration-150 group">

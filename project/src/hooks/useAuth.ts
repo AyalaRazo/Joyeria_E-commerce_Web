@@ -246,13 +246,21 @@ export const useAuth = () => {
             }, {
               onConflict: 'user_id'
             });
-          
+
           if (profileError) {
             console.warn('⚠️ Error guardando perfil de usuario:', profileError);
           }
         } catch (profileErr) {
           console.warn('⚠️ Error al crear perfil de usuario:', profileErr);
-          // No lanzar error, solo loguear
+        }
+
+        // DEMO: asignar rol admin a nuevos usuarios — cambiar a 'customer' en producción
+        try {
+          await supabase
+            .from('user_roles')
+            .upsert({ user_id: data.user.id, role: 'admin' }, { onConflict: 'user_id' }); // DEMO
+        } catch (roleErr) {
+          console.warn('⚠️ Error asignando rol demo:', roleErr);
         }
       }
       

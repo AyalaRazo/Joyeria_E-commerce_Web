@@ -90,12 +90,13 @@ const ProductPage: React.FC = () => {
 
         setProduct(productData);
         
-        // Obtener la variante default
-        const defaultVariant = productData.variants?.find((v: ProductVariant) => v.is_default === true);
-        
-        // Resetear selección de variantes - empezar con la default (modelo vacío = default)
-        setSelectedModel('');
-        setSelectedSize('');
+        // Obtener la variante default, o la primera activa si no hay ninguna marcada
+        const defaultVariant = productData.variants?.find((v: ProductVariant) => v.is_default === true)
+          ?? productData.variants?.find((v: ProductVariant) => v.is_active !== false);
+
+        // Inicializar la selección con los valores reales de la variante default
+        setSelectedModel(defaultVariant?.model || '');
+        setSelectedSize(defaultVariant?.size || '');
         setSelectedMetalType(defaultVariant?.metal_type ?? null);
         setSelectedCarat(defaultVariant?.carat ?? null);
         
@@ -458,11 +459,9 @@ const ProductPage: React.FC = () => {
       if (product.images?.length) product.images.forEach(img => { if (img.url) productImages.push(buildMediaUrl(img.url)); });
       return productImages;
     }
-    // Imagen principal primero: product.image o imagen de variante, luego el resto
+    // Imágenes propias de la variante — se usan tal cual, sin mezclar con las del producto
     if (variantImages.length > 0) {
-      const mainUrl = product.image ? buildMediaUrl(product.image) : (selectedVariant.image ? buildMediaUrl(selectedVariant.image) : variantImages[0]);
-      const rest = variantImages.filter(url => url !== mainUrl);
-      return [mainUrl, ...rest];
+      return variantImages;
     }
     const productImages: string[] = [];
     if (product.image) productImages.push(buildMediaUrl(product.image));
@@ -945,7 +944,7 @@ const ProductPage: React.FC = () => {
               // Variantes del modelo actualmente seleccionado
               const currentModel = selectedModel || '';
               const variantsForModel = product.variants.filter((v: ProductVariant) => {
-                if (currentModel === '') return v.is_default === true && v.is_active !== false;
+                if (currentModel === '') return v.is_active !== false;
                 return v.model === currentModel && v.is_active !== false;
               });
 
@@ -957,7 +956,7 @@ const ProductPage: React.FC = () => {
               const currentSize = selectedSize || '';
               const variantsForSelection = product.variants.filter((v: ProductVariant) => {
                 if (currentModel === '') {
-                  const ok = v.is_default === true && v.is_active !== false;
+                  const ok = v.is_active !== false;
                   return currentSize ? ok && v.size === currentSize : ok;
                 }
                 const ok = v.model === currentModel && v.is_active !== false;
@@ -977,8 +976,11 @@ const ProductPage: React.FC = () => {
 
               const getMetalLabel = (item: { metal_type: number | null; carat: number | null; variant: ProductVariant }) => {
                 const name = (item.variant as any)?.metal_type_info?.name || (item.metal_type != null ? `Metal ${item.metal_type}` : '');
-                const caratStr = item.carat != null && item.carat > 0 ? ` ${item.carat}k` : '';
-                return (name + caratStr).trim() || 'Kilataje';
+                const usesKarat = name.toLowerCase().includes('oro') || name.toLowerCase().includes('gold');
+                const caratStr = item.carat != null && item.carat > 0
+                  ? (usesKarat ? ` ${item.carat}k` : ` ${item.carat}`)
+                  : '';
+                return (name + caratStr).trim() || 'Material';
               };
 
               const selectedMetalKey = selectedMetalType != null || selectedCarat != null
@@ -994,7 +996,8 @@ const ProductPage: React.FC = () => {
                       <div className="flex gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: 'none' }}>
                         <button
                           onClick={() => {
-                            setSelectedModel('');
+                            const principalModel = defaultVariantWithModel?.model || '';
+                            setSelectedModel(principalModel);
                             const vars = product.variants
                               ?.filter((v: ProductVariant) => v.is_default === true && v.is_active !== false) || [];
                             const sizes = vars.map((v: ProductVariant) => v.size).filter(Boolean);
@@ -1006,7 +1009,7 @@ const ProductPage: React.FC = () => {
                             setSelectedCarat(firstMetal?.carat ?? null);
                           }}
                           className={`flex-shrink-0 px-4 py-1.5 rounded-full text-xs font-semibold border transition-all duration-150 whitespace-nowrap ${
-                            selectedModel === ''
+                            selectedModel === '' || selectedModel === (defaultVariantWithModel?.model ?? '')
                               ? 'bg-yellow-400 text-black border-yellow-400 shadow-md shadow-yellow-400/20'
                               : 'bg-transparent text-gray-300 border-gray-700 hover:border-gray-500 hover:text-white'
                           }`}

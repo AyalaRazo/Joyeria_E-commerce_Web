@@ -2688,26 +2688,36 @@ const fetchOrderDetails = async (orderId: number) => {
                                     {modelVariants.map((variant) => (
                                       <div key={variant.id} className="flex items-center gap-2.5 py-2 px-3 rounded-xl bg-gray-800/30 hover:bg-gray-800/60 border border-transparent hover:border-gray-700/40 transition-all group">
 
+                                        {/* Badge activo/inactivo */}
+                                        <span className={`flex-shrink-0 inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-bold tracking-wide ${variant.is_active !== false ? 'bg-green-500/10 text-green-400 border border-green-500/20' : 'bg-red-500/10 text-red-400 border border-red-500/20'}`}>
+                                          {variant.is_active !== false ? 'Activo' : 'Inactivo'}
+                                        </span>
+
                                         {/* Badge de talla */}
                                         <span className="flex-shrink-0 inline-flex items-center px-2 py-0.5 rounded-md bg-yellow-500/10 text-yellow-400 border border-yellow-500/20 text-[11px] font-bold tracking-wide min-w-[3rem] justify-center">
                                           {variant.size || 'Única'}
                                         </span>
 
                                         {/* Metal y quilates */}
-                                        {(variant.metal_type || variant.carat) && (
+                                        {(variant.metal_type || variant.carat) && (() => {
+                                          const allMetals = metalTypesList.length ? metalTypesList : metalTypes || [];
+                                          const metalName = allMetals.find((m: { id: number; name: string }) => m.id === variant.metal_type)?.name || '';
+                                          const usesKarat = metalName.toLowerCase().includes('oro') || metalName.toLowerCase().includes('gold');
+                                          return (
                                           <div className="flex items-center gap-1 flex-shrink-0">
                                             {variant.metal_type && (
                                               <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-700/60 text-gray-400 font-medium border border-gray-600/30">
-                                                {variant.metal_type}
+                                                {metalName || variant.metal_type}
                                               </span>
                                             )}
                                             {variant.carat && (
                                               <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-700/60 text-gray-400 font-medium border border-gray-600/30">
-                                                {variant.carat}k
+                                                {variant.carat}{usesKarat ? 'k' : ''}
                                               </span>
                                             )}
                                           </div>
-                                        )}
+                                        );
+                                        })()}
 
                                         {/* Divisor */}
                                         <div className="w-px h-3.5 bg-gray-700/70 flex-shrink-0" />
@@ -2760,11 +2770,6 @@ const fetchOrderDetails = async (orderId: number) => {
                                         )}
 
                                         <span className="flex-1" />
-
-                                        {/* Estado */}
-                                        <span className={`flex-shrink-0 text-[9px] font-bold px-2 py-0.5 rounded-full border ${variant.is_active !== false ? 'bg-green-500/10 text-green-400 border-green-500/20' : 'bg-red-500/10 text-red-400 border-red-500/20'}`}>
-                                          {variant.is_active !== false ? 'Activo' : 'Inactivo'}
-                                        </span>
 
                                         {/* Acciones */}
                                         <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
@@ -5208,9 +5213,6 @@ const fetchOrderDetails = async (orderId: number) => {
                           {variant.model && <div className="text-sm text-gray-400">Modelo: {variant.model}</div>}
                           {variant.size && <div className="text-sm text-gray-400">Talla: {variant.size}</div>}
                           <div className="text-sm text-gray-400">Stock: {variant.stock || 0}</div>
-                          <span className={`inline-block mt-1 px-2 py-0.5 rounded-full text-xs font-medium ${variant.is_active !== false ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
-                            {variant.is_active !== false ? 'Activo' : 'Inactivo'}
-                          </span>
                         </div>
                       </div>
                       <div className="text-right">
@@ -5371,7 +5373,9 @@ const fetchOrderDetails = async (orderId: number) => {
                           <span className="text-xs text-gray-500">SKU: {it.variant?.sku || it.product?.sku || it.product_id}</span>
                           {it.variant && (
                             <span className="text-xs text-gray-400">
-                              {it.variant.model ? `· ${it.variant.model}` : ''}
+                              {it.variant.model
+                                ? `· ${it.variant.model}${it.variant.is_default ? ' (Principal)' : ''}`
+                                : it.variant.is_default ? '· Principal' : ''}
                               {it.variant.size ? ` T:${it.variant.size}` : ''}
                             </span>
                           )}

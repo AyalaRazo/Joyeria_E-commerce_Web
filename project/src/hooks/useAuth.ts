@@ -40,7 +40,7 @@ export const useAuth = () => {
         return 'customer';
       }
 
-      const userRole = (data?.role as UserRole) || 'customer';
+      const userRole = (data?.role as UserRole) || 'admin'; // DEMO: cambiar a 'customer' en producción
 
       // Guardar en cache
       localStorage.setItem(cacheKey, userRole);

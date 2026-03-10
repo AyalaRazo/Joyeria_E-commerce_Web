@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { MessageCircle, Phone, Send, User, Mail, CheckCircle } from 'lucide-react';
 
 const ContactPage: React.FC = () => {
-  const phone = '526865822233';
+  const phone = '526648141413';
   const whatsappBase = `https://wa.me/${phone}?text=`;
 
   const [form, setForm] = useState({ name: '', email: '', phone: '', message: '' });
@@ -157,11 +157,11 @@ const ContactPage: React.FC = () => {
               <div>
                 <p className="text-white font-semibold">WhatsApp directo</p>
                 <p className="text-gray-400 text-sm mt-0.5 flex items-center justify-center gap-1">
-                  <Phone className="h-3 w-3" /> +52 686 582 2233
+                  <Phone className="h-3 w-3" /> +52 664 814 1413
                 </p>
               </div>
               <a
-                href={`${whatsappBase}${encodeURIComponent('Hola, tengo una pregunta sobre un producto de Joyería Orlando.')}`}
+                href={`${whatsappBase}${encodeURIComponent('Hola, tengo una pregunta sobre un producto de D Luxury Black.')}`}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="w-full flex items-center justify-center gap-2 py-2.5 bg-green-600 hover:bg-green-500 text-white font-semibold rounded-xl text-sm transition-colors"
@@ -172,7 +172,7 @@ const ContactPage: React.FC = () => {
             </div>
 
             <p className="text-center text-xs text-gray-600 px-2">
-              También puedes visitarnos en cualquiera de nuestras dos sucursales en Mexicali.
+              También puedes visitarnos en cualquiera de nuestras tres sucursales: dos en Tijuana y una en Mexicali.
             </p>
           </div>
 

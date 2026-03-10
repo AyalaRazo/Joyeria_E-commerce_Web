@@ -90,9 +90,11 @@ const Header: React.FC<HeaderProps> = ({
             }}
           >
             <div>
-              <h1 className="text-lg sm:text-xl font-bold bg-gradient-to-r from-gray-300 via-gray-400 to-gray-500 bg-clip-text text-transparent">
-                Joyeria Orlando
-              </h1>
+              <img
+                src="/images/logo.png"
+                alt="D Luxury Black"
+                className="h-10 sm:h-12 w-auto object-contain"
+              />
             </div>
           </div>
 

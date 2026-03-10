@@ -144,7 +144,7 @@ const Cart: React.FC<CartProps> = ({
                                 {item.variant.model || 'Principal'}
                                 {item.variant.size && ` · T${item.variant.size}`}
                                 {(item.variant.metal_name || item.variant.carat) && (
-                                  ` · ${[item.variant.metal_name, item.variant.carat ? `${item.variant.carat}k` : ''].filter(Boolean).join(' ')}`
+                                  ` · ${[item.variant.metal_name, item.variant.carat ? `${item.variant.carat}${(item.variant.metal_name || '').toLowerCase().includes('oro') || (item.variant.metal_name || '').toLowerCase().includes('gold') ? 'k' : ''}` : ''].filter(Boolean).join(' ')}`
                                 )}
                               </p>
                             )}

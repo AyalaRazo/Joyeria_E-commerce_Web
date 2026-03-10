@@ -33,6 +33,7 @@ import InvoiceHelp from './pages/InvoiceHelp';
 import FavoritesPage from './pages/FavoritesPage';
 import ContactPage from './pages/ContactPage';
 import JewelryTicker from './components/JewelryTicker';
+import ReviewsSlider from './components/ReviewsSlider';
 
 
 function App() {
@@ -229,7 +230,7 @@ function App() {
                   Hasta 30% de descuento<br className="hidden sm:block" /> en piezas seleccionadas
                 </h2>
                 <p className="text-gray-300 text-sm sm:text-base max-w-md leading-relaxed">
-                  Visita cualquiera de nuestras dos sucursales en Mexicali y aprovecha esta promoción por tiempo limitado.
+                  Visita cualquiera de nuestras tres sucursales en Tijuana y Mexicali y aprovecha esta promoción por tiempo limitado.
                 </p>
               </div>
             </section>
@@ -241,6 +242,7 @@ function App() {
               loading={productsLoading}
               error={productsError}
             />
+            <ReviewsSlider />
             <div className="lg:w-4/6 lg:px-0 px-8 mx-auto py-16">
               <NewsletterForm />
             </div>

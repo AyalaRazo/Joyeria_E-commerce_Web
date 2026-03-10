@@ -1,14 +1,19 @@
 import React from 'react';
-import { Gem, Truck, Tag, Sparkles } from 'lucide-react';
+import { Gem, Truck, Shield, Sparkles, Watch, Diamond } from 'lucide-react';
 
 const items = [
-  { text: 'Aretes de moda',          icon: <Sparkles className="h-3 w-3 flex-shrink-0" /> },
-  { text: 'Anillos para toda ocasión', icon: <Gem      className="h-3 w-3 flex-shrink-0" /> },
-  { text: 'Pulseras elegantes',       icon: <Gem      className="h-3 w-3 flex-shrink-0" /> },
-  { text: 'Dijes y colgantes',        icon: <Sparkles className="h-3 w-3 flex-shrink-0" /> },
-  { text: 'Sets completos',           icon: <Gem      className="h-3 w-3 flex-shrink-0" /> },
-  { text: 'Envíos a todo México',     icon: <Truck    className="h-3 w-3 flex-shrink-0" /> },
-  { text: 'Precios accesibles',       icon: <Tag      className="h-3 w-3 flex-shrink-0" /> },
+  { text: 'Joyería fina con certificación',         icon: <Gem       className="h-3 w-3 flex-shrink-0" /> },
+  { text: 'Diamantes certificados',                 icon: <Diamond   className="h-3 w-3 flex-shrink-0" /> },
+  { text: 'Relojería de alto valor',                icon: <Watch     className="h-3 w-3 flex-shrink-0" /> },
+  { text: 'Garantía en cada pieza',                 icon: <Shield    className="h-3 w-3 flex-shrink-0" /> },
+  { text: 'Anillos de compromiso y boda',           icon: <Sparkles  className="h-3 w-3 flex-shrink-0" /> },
+  { text: 'Envíos a todo México',                   icon: <Truck     className="h-3 w-3 flex-shrink-0" /> },
+  { text: 'Pulseras y collares de lujo',            icon: <Gem       className="h-3 w-3 flex-shrink-0" /> },
+  { text: 'Discreción y seguridad garantizadas',    icon: <Shield    className="h-3 w-3 flex-shrink-0" /> },
+  { text: 'Sucursales en Tijuana y Mexicali',       icon: <Sparkles  className="h-3 w-3 flex-shrink-0" /> },
+  { text: 'Aretes y dijes exclusivos',              icon: <Diamond   className="h-3 w-3 flex-shrink-0" /> },
+  { text: 'Asesoría personalizada sin costo',       icon: <Gem       className="h-3 w-3 flex-shrink-0" /> },
+  { text: 'Relojes de marcas reconocidas',          icon: <Watch     className="h-3 w-3 flex-shrink-0" /> },
 ];
 
 // Duplicamos para el loop infinito sin salto

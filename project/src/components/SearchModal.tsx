@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { X, Search, SlidersHorizontal, Plus, Star, Tag, Box, Gem } from 'lucide-react';
-// Agrega 'Gem' o 'Diamond' para representar materiales
+import { X, Search, SlidersHorizontal, Star, Tag, Sparkles } from 'lucide-react';
 import { Product } from '../types/index';
 import { useNavigate } from 'react-router-dom';
 import { useProducts } from '../hooks/useProducts';
 import { buildMediaUrl } from '../utils/storage';
 import { isProductNew } from '../utils/product';
+import { supabase } from '../lib/supabase';
 
 interface SearchModalProps {
   isOpen: boolean;
@@ -187,110 +187,189 @@ const SearchModal: React.FC<SearchModalProps> = ({
   if (!isOpen) return null;
 
   const SimplifiedProductCard = ({ product }: { product: Product }) => {
-    const {
-      inStock,
-      price,
-      originalPrice,
-      hasDiscount,
-      discountPercentage,
-      image,
-      isFeatured,
-      isNew,
-      categoryName,
-      model,
-      material
-    } = getProductDetails(product);
+    const [selectedModel, setSelectedModel] = useState('');
+    const [variantImage, setVariantImage] = useState<string | null>(null);
+
+    const getDefaultVariant = () =>
+      product.variants?.find(v => v.is_default === true) ?? null;
+
+    const getAvailableModels = () => {
+      if (!product.variants || product.variants.length === 0) return [];
+      const def = getDefaultVariant();
+      const defModelNorm = (def?.model ?? '').trim().toLowerCase();
+      const others = product.variants.filter(v => {
+        if (v.is_active === false) return false;
+        if (def && v.id === def.id) return false;
+        return !((defModelNorm && (v.model ?? '').trim().toLowerCase() === defModelNorm));
+      });
+      const map = new Map<string, { index: number }>();
+      let idx = 1;
+      others.forEach(v => { const k = (v.model ?? '').trim(); if (!map.has(k)) map.set(k, { index: idx++ }); });
+      return Array.from(map.entries()).map(([model, d]) => ({ model, index: d.index }));
+    };
+
+    const defaultVariant = getDefaultVariant();
+    const availableModels = getAvailableModels();
+    const selectedVariant = selectedModel
+      ? product.variants?.find(v => v.model === selectedModel && v.is_active !== false)
+      : defaultVariant;
+
+    useEffect(() => {
+      const load = async () => {
+        if (!selectedVariant || selectedVariant.use_product_images) { setVariantImage(null); return; }
+        const vid = selectedVariant.id;
+        if (!vid || !Number.isInteger(vid) || vid <= 0) { setVariantImage(null); return; }
+        try {
+          const { data, error } = await supabase.rpc('get_variant_images', { p_variant_id: vid });
+          if (error) { setVariantImage(null); return; }
+          const imgs = (data || []).sort((a: any, b: any) => (a.ordering || 0) - (b.ordering || 0));
+          setVariantImage(imgs.length > 0 && imgs[0].url ? imgs[0].url : null);
+        } catch { setVariantImage(null); }
+      };
+      load();
+    }, [selectedVariant]);
+
+    const displayImage = buildMediaUrl(
+      !selectedVariant || selectedVariant.use_product_images ? product.image : (variantImage || product.image)
+    );
+    const displayPrice = selectedVariant?.price ?? product.price;
+    const displayOriginalPrice = selectedVariant?.original_price ?? product.original_price;
+    const hasDiscount = !!(displayOriginalPrice && displayOriginalPrice > displayPrice);
+    const discountPct = hasDiscount
+      ? Math.round(((displayOriginalPrice! - displayPrice) / displayOriginalPrice!) * 100)
+      : 0;
+    const isSoldOut = product.variants && product.variants.length > 0
+      ? !product.variants.some(v => v.is_active !== false && (v.stock ?? 0) > 0)
+      : false;
+    const isNew = isProductNew(product);
+    const isFeatured = !!product.is_featured;
+    const { categoryName } = getProductDetails(product);
+    const stopProp = (e: React.MouseEvent) => e.stopPropagation();
 
     return (
-      <div 
-        className="group relative bg-gradient-to-br from-gray-800 to-gray-900 rounded-lg overflow-hidden shadow hover:shadow-gray-400/5 transition-all duration-200 cursor-pointer h-full border border-gray-700 flex flex-col"
-        onClick={() => navigate(`/producto/${product.id}`)}
+      <div
+        className="group relative bg-gray-900 rounded-2xl overflow-hidden cursor-pointer flex flex-col h-full transition-all duration-300 hover:shadow-2xl hover:shadow-yellow-400/5 border border-gray-800/60 hover:border-gray-700/80"
+        onClick={() => { navigate(`/producto/${product.id}`); onClose(); }}
       >
-        <div className="relative aspect-square overflow-hidden bg-gray-900">
+        {/* Imagen */}
+        <div className="relative w-full aspect-[3/4] overflow-hidden bg-gray-950">
           <img
-            src={buildMediaUrl(image)}
+            src={displayImage}
             alt={product.name}
-            className="w-full h-full object-contain p-2 group-hover:scale-105 transition-transform duration-300"
+            className="w-full h-full object-contain transition-transform duration-500 group-hover:scale-105"
           />
-          
-          {/* Badges con iconos en esquina inferior izquierda */}
-          <div className="absolute bottom-2 left-2 flex flex-wrap gap-1 justify-start">
+          <div className="absolute inset-0 bg-gradient-to-t from-gray-950/80 via-gray-950/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none" />
+
+          {isSoldOut && (
+            <div className="absolute inset-0 bg-black/65 backdrop-blur-[1px] flex items-center justify-center">
+              <span className="text-white text-xs font-semibold tracking-[0.2em] uppercase px-3 py-1.5 border border-white/20 rounded-full bg-black/40">
+                Agotado
+              </span>
+            </div>
+          )}
+
+          <div className="absolute top-2.5 left-2.5 flex flex-col gap-1.5">
             {isNew && (
-              <span className="bg-green-600 text-white px-1.5 py-0.5 rounded-full text-[10px] font-bold flex items-center justify-center">
-                <Plus className="h-3 w-3" fill="currentColor" />
+              <span className="inline-flex items-center gap-1 pl-1.5 pr-2 py-0.5 rounded-full text-[9px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 backdrop-blur-sm">
+                <Sparkles className="h-2.5 w-2.5 fill-emerald-300" />
+                NUEVO
               </span>
             )}
             {isFeatured && (
-              <span className="bg-gray-300 text-black px-1.5 py-0.5 rounded-full text-[10px] font-bold flex items-center justify-center">
-                <Star className="h-2.5 w-2.5" fill="currentColor" />
-              </span>
-            )}
-            {hasDiscount && (
-              <span className="bg-red-600 text-white px-1.5 py-0.5 rounded-full text-[10px] font-bold flex items-center justify-center">
-                -{discountPercentage}%
+              <span className="inline-flex items-center gap-1 pl-1.5 pr-2 py-0.5 rounded-full text-[9px] font-bold bg-yellow-400/15 text-yellow-300 border border-yellow-400/30 backdrop-blur-sm">
+                <Star className="h-2.5 w-2.5 fill-yellow-300" />
+                DESTACADO
               </span>
             )}
           </div>
         </div>
 
-        <div className="p-3 flex-1 flex flex-col">
-          <div className="flex-1">
-            <h3 className="text-xs font-bold text-white mb-1.5 line-clamp-2 min-h-[2.5rem]">
-              {product.name}
-            </h3>
-            
-            {/* Mostrar materiales si existen */}
-            {material && (
-              <div className="flex items-center gap-1 mb-1.5">
-                <Gem className="h-2.5 w-2.5 text-yellow-400" /> {/* Cambiado a amarillo */}
-                <span className="text-[10px] text-yellow-400 truncate"> {/* Cambiado a amarillo */}
-                  {material}
-                </span>
-              </div>
+        {/* Info */}
+        <div className="p-3.5 flex-1 flex flex-col gap-2.5">
+          {/* Estrellas */}
+          <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-0.5">
+              {[1, 2, 3, 4, 5].map(i => {
+                const fill = Math.min(Math.max((product.avg_rating ?? 0) - (i - 1), 0), 1);
+                return (
+                  <span key={i} className="relative inline-block w-3 h-3">
+                    <Star className="absolute inset-0 h-3 w-3 text-gray-700" />
+                    {fill > 0 && (
+                      <span className="absolute inset-0 overflow-hidden" style={{ width: `${fill * 100}%` }}>
+                        <Star className="h-3 w-3 text-yellow-400 fill-yellow-400" />
+                      </span>
+                    )}
+                  </span>
+                );
+              })}
+            </div>
+            {(product.review_count ?? 0) > 0 ? (
+              <span className="text-[10px] text-gray-500">{product.avg_rating?.toFixed(1)} ({product.review_count})</span>
+            ) : (
+              <span className="text-[10px] text-gray-700">Sin reseñas</span>
             )}
-            
-            {/* Mostrar modelo si existe - color blanco */}
-            {model && (
-              <div className="flex items-center gap-1 mb-1.5">
-                <Box className="h-2.5 w-2.5 text-gray-400" />
-                <span className="text-[10px] text-white font-medium truncate">
-                  Modelo: {model}
-                </span>
-              </div>
-            )}
-            
-            <p className="text-[10px] text-gray-400 mb-2 line-clamp-1">
-              {categoryName}
-            </p>
           </div>
-          
-          <div className="space-y-1.5 pt-2 border-t border-gray-700">
-            <div className="flex items-center justify-between">
-              <span className="text-sm font-bold text-gray-300">
-                {formatPrice(price)}
-              </span>
-              {hasDiscount && originalPrice && (
-                <span className="text-[10px] line-through text-gray-500">
-                  {formatPrice(originalPrice)}
-                </span>
-              )}
-            </div>
-            
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-1">
-                <div className={`w-2 h-2 rounded-full ${inStock ? 'bg-green-500' : 'bg-red-500'}`}></div>
-                <span className={`text-[10px] ${inStock ? 'text-green-400' : 'text-red-400'}`}>
-                  {inStock ? 'Disponible' : 'Agotado'}
-                </span>
+
+          {categoryName && (
+            <span className="text-[9px] font-semibold uppercase tracking-widest text-gray-600">{categoryName}</span>
+          )}
+
+          <h3 className="text-sm font-semibold text-gray-100 group-hover:text-white transition-colors duration-200 line-clamp-2 leading-snug">
+            {product.name}
+          </h3>
+
+          {/* Selector de modelo */}
+          {availableModels.length > 0 && (
+            <div onClick={stopProp}>
+              <p className="text-[9px] font-semibold uppercase tracking-widest text-gray-600 mb-1.5">Modelo</p>
+              <div className="flex gap-1.5 overflow-x-auto pb-0.5" style={{ scrollbarWidth: 'none' }}>
+                <button
+                  onClick={e => { e.stopPropagation(); setSelectedModel(''); }}
+                  className={`flex-shrink-0 px-2.5 py-0.5 rounded-full text-[10px] font-semibold border transition-all duration-150 whitespace-nowrap ${
+                    selectedModel === ''
+                      ? 'bg-yellow-400 text-black border-yellow-400'
+                      : 'bg-transparent text-gray-400 border-gray-700 hover:border-gray-500 hover:text-white'
+                  }`}
+                >
+                  {defaultVariant?.model || 'Principal'}
+                </button>
+                {availableModels.map(m => (
+                  <button
+                    key={m.model || `model-${m.index}`}
+                    onClick={e => { e.stopPropagation(); setSelectedModel(m.model); }}
+                    className={`flex-shrink-0 px-2.5 py-0.5 rounded-full text-[10px] font-semibold border transition-all duration-150 whitespace-nowrap ${
+                      selectedModel === m.model
+                        ? 'bg-yellow-400 text-black border-yellow-400'
+                        : 'bg-transparent text-gray-400 border-gray-700 hover:border-gray-500 hover:text-white'
+                    }`}
+                  >
+                    {m.model || `Modelo ${m.index}`}
+                  </button>
+                ))}
               </div>
-              {hasDiscount && originalPrice && (
-                <span className="text-[10px] font-bold text-green-400">
-                  Ahorra {formatPrice(originalPrice - price)}
-                </span>
-              )}
             </div>
+          )}
+
+          {/* Precio */}
+          <div className="mt-auto pt-1">
+            {hasDiscount ? (
+              <div className="space-y-0.5">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-base font-bold text-yellow-400">{formatPrice(displayPrice)}</span>
+                  <span className="inline-flex items-center gap-0.5 text-[9px] font-bold text-rose-300 bg-rose-500/15 border border-rose-500/25 px-1.5 py-0.5 rounded-full">
+                    <Tag className="h-2.5 w-2.5" />
+                    -{discountPct}%
+                  </span>
+                </div>
+                <span className="text-xs text-gray-600 line-through">{formatPrice(displayOriginalPrice!)}</span>
+              </div>
+            ) : (
+              <span className="text-base font-bold text-yellow-400">{formatPrice(displayPrice)}</span>
+            )}
           </div>
         </div>
+
+        <div className="absolute inset-0 rounded-2xl border border-yellow-400/0 group-hover:border-yellow-400/10 transition-all duration-300 pointer-events-none" />
       </div>
     );
   };

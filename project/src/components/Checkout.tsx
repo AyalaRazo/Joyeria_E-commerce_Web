@@ -1117,11 +1117,12 @@ const Checkout: React.FC<CheckoutProps> = ({
                         const variantSize = (item as any).variant?.size;
                         const variantMetal = (item as any).variant?.metal_name;
                         const variantCarat = (item as any).variant?.carat;
+                        const variantUsesKarat = (variantMetal || '').toLowerCase().includes('oro') || (variantMetal || '').toLowerCase().includes('gold');
                         const variantDetails = [
                           variantModel || 'Principal',
                           variantSize ? `T${variantSize}` : '',
                           variantMetal || '',
-                          variantCarat ? `${variantCarat}k` : ''
+                          variantCarat ? `${variantCarat}${variantUsesKarat ? 'k' : ''}` : ''
                         ].filter(Boolean).join(' · ');
 
                         return (

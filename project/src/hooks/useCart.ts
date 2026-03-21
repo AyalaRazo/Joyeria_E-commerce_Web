@@ -138,7 +138,7 @@ export const useCart = () => {
       setError(null);
       const { data: { user } } = await supabase.auth.getUser();
 
-      const stock = variant?.stock ?? product.stock ?? 0;
+      const stock = variant?.stock ?? 0;
       if (stock <= 0) {
         throw new Error('This product is out of stock');
       }
@@ -167,18 +167,19 @@ export const useCart = () => {
               name: product.name,
               price: variant?.price ?? product.price,
               original_price: product.original_price,
-              image: product.image, // Siempre usar imagen del producto base
+              image: product.image,
               description: product.description,
               material: product.material,
               category_id: product.category_id,
-              stock: product.stock
             },
             variant: variant ? {
               id: variant.id,
               product_id: variant.product_id,
               name: variant.name,
               price: variant.price,
-              image: variant.use_product_images ? product.image : (variant.image || product.image),
+              image: variant.use_product_images
+                ? product.image
+                : (variant.image || (variant as any).variant_images?.[0]?.url || (variant as any).images?.[0]?.url || product.image),
               model: variant.model,
               size: variant.size,
               stock: variant.stock,
@@ -235,7 +236,7 @@ export const useCart = () => {
             name: product.name,
             price: variant?.price ?? product.price,
             original_price: product.original_price,
-            image: product.image, // Siempre usar imagen del producto base
+            image: product.image,
             description: product.description,
             material: product.material,
             in_stock: product.in_stock,
@@ -244,14 +245,15 @@ export const useCart = () => {
             created_at: product.created_at,
             updated_at: product.updated_at,
             category_id: product.category_id,
-            stock: product.stock
           },
           variant: variant ? {
             id: variant.id,
             product_id: variant.product_id,
             name: variant.name,
             price: variant.price,
-            image: variant.use_product_images ? product.image : (variant.image || product.image),
+            image: variant.use_product_images
+              ? product.image
+              : (variant.image || (variant as any).variant_images?.[0]?.url || (variant as any).images?.[0]?.url || product.image),
             model: variant.model,
             size: variant.size,
             stock: variant.stock,

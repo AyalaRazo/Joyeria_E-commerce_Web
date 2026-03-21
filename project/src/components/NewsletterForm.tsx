@@ -65,6 +65,44 @@ const NewsletterForm: React.FC = () => {
 
       if (error) throw error;
 
+      // Email de confirmación de suscripción
+      try {
+        const interestsList = interests.length > 0
+          ? `<p style="color:#ccc;">Tus intereses: <strong style="color:#facc15;">${interests.join(', ')}</strong></p>`
+          : '';
+        const year = new Date().getFullYear();
+        await supabase.functions.invoke('send-email', {
+          body: {
+            to: email,
+            subject: '✅ Confirmación de suscripción — D Luxury Black',
+            html: `
+              <div style="font-family:Arial,sans-serif;background:#000;padding:20px;">
+                <div style="max-width:600px;margin:auto;background:#111;padding:30px;border-radius:12px;">
+                  <h2 style="color:#facc15;text-align:center;margin-bottom:4px;">¡Ya eres parte del Club Exclusivo! 💎</h2>
+                  <p style="color:#aaa;text-align:center;margin-top:0;">Tu suscripción ha sido confirmada.</p>
+                  <hr style="border:none;border-top:1px solid #333;margin:20px 0;">
+                  <p style="color:#ccc;line-height:1.6;">
+                    A partir de ahora recibirás novedades, lanzamientos exclusivos y ofertas especiales de D Luxury Black directamente en tu correo.
+                  </p>
+                  ${interestsList}
+                  <div style="text-align:center;margin:28px 0;">
+                    <a href="https://dluxuryblack.com"
+                      style="display:inline-block;background:#facc15;color:#000;font-weight:700;padding:14px 32px;border-radius:50px;text-decoration:none;font-size:14px;">
+                      Ver Colección
+                    </a>
+                  </div>
+                  <p style="color:#555;font-size:11px;text-align:center;margin-top:24px;">
+                    © ${year} D Luxury Black. Todos los derechos reservados.<br>
+                    <a href="https://dluxuryblack.com/unsubscribe" style="color:#777;">Darse de baja</a>
+                  </p>
+                </div>
+              </div>`,
+          },
+        });
+      } catch (emailErr) {
+        console.warn('⚠️ Error enviando email de suscripción:', emailErr);
+      }
+
       trackCompleteRegistration();
       setIsSuccess(true);
       setEmail('');

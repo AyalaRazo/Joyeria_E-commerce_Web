@@ -14,6 +14,41 @@ const UnsubscribeForm: React.FC<{ token?: string }> = ({ token }) => {
     }
   }, [token]);
 
+  const sendUnsubscribeConfirmation = async (unsubscribedEmail: string) => {
+    try {
+      const year = new Date().getFullYear();
+      await supabase.functions.invoke('send-email', {
+        body: {
+          to: unsubscribedEmail,
+          subject: '👋 Has sido dado de baja — D Luxury Black',
+          html: `
+            <div style="font-family:Arial,sans-serif;background:#000;padding:20px;">
+              <div style="max-width:600px;margin:auto;background:#111;padding:30px;border-radius:12px;">
+                <h2 style="color:#facc15;text-align:center;margin-bottom:4px;">Baja confirmada</h2>
+                <p style="color:#aaa;text-align:center;margin-top:0;">Tu email ha sido removido de nuestra lista.</p>
+                <hr style="border:none;border-top:1px solid #333;margin:20px 0;">
+                <p style="color:#ccc;line-height:1.6;">
+                  El correo <strong>${unsubscribedEmail}</strong> ya no recibirá comunicaciones de D Luxury Black.<br><br>
+                  Si en algún momento deseas volver a suscribirte, puedes hacerlo desde nuestra tienda en línea.
+                </p>
+                <div style="text-align:center;margin:28px 0;">
+                  <a href="https://dluxuryblack.com"
+                    style="display:inline-block;background:#facc15;color:#000;font-weight:700;padding:14px 32px;border-radius:50px;text-decoration:none;font-size:14px;">
+                    Volver a la tienda
+                  </a>
+                </div>
+                <p style="color:#555;font-size:11px;text-align:center;margin-top:24px;">
+                  © ${year} D Luxury Black. Todos los derechos reservados.
+                </p>
+              </div>
+            </div>`,
+        },
+      });
+    } catch (emailErr) {
+      console.warn('⚠️ Error enviando confirmación de baja:', emailErr);
+    }
+  };
+
   const handleTokenUnsubscribe = async (unsubscribeToken: string) => {
     setIsLoading(true);
     try {
@@ -30,6 +65,7 @@ const UnsubscribeForm: React.FC<{ token?: string }> = ({ token }) => {
           text: `El email ${data[0].email} ha sido dado de baja correctamente.`,
           type: 'success'
         });
+        await sendUnsubscribeConfirmation(data[0].email);
       } else {
         setMessage({
           text: 'Token no válido o ya estaba dado de baja.',
@@ -105,6 +141,7 @@ const UnsubscribeForm: React.FC<{ token?: string }> = ({ token }) => {
         text: `El email ${email} ha sido dado de baja correctamente.`,
         type: 'success'
       });
+      await sendUnsubscribeConfirmation(email);
       setStep('init');
       setEmail('');
     } catch (err) {

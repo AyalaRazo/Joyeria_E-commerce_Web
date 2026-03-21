@@ -262,8 +262,47 @@ export const useAuth = () => {
         } catch (roleErr) {
           console.warn('⚠️ Error asignando rol demo:', roleErr);
         }
+
+        // Email de bienvenida
+        try {
+          const year = new Date().getFullYear();
+          await supabase.functions.invoke('send-email', {
+            body: {
+              to: email,
+              subject: `¡Bienvenido/a a D Luxury Black, ${name}! 💎`,
+              html: `
+                <div style="font-family:Arial,sans-serif;background:#000;padding:20px;">
+                  <div style="max-width:600px;margin:auto;background:#111;padding:30px;border-radius:12px;">
+                    <h2 style="color:#facc15;text-align:center;margin-bottom:4px;">¡Bienvenido/a, ${name}! 💎</h2>
+                    <p style="color:#aaa;text-align:center;margin-top:0;">Tu cuenta en D Luxury Black está lista.</p>
+                    <hr style="border:none;border-top:1px solid #333;margin:20px 0;">
+                    <p style="color:#ccc;line-height:1.6;">
+                      Explora nuestra colección de joyería artesanal de alta calidad: anillos, collares, pulseras, aretes y diamantes — todos con garantía y envío seguro a todo México.
+                    </p>
+                    <div style="text-align:center;margin:28px 0;">
+                      <a href="https://dluxuryblack.com"
+                        style="display:inline-block;background:#facc15;color:#000;font-weight:700;padding:14px 32px;border-radius:50px;text-decoration:none;font-size:14px;letter-spacing:0.05em;">
+                        Explorar Colección
+                      </a>
+                    </div>
+                    <div style="background:#1a1a1a;border-radius:8px;padding:16px;margin-top:10px;">
+                      <p style="color:#facc15;font-size:13px;font-weight:600;margin:0 0 8px;">📞 ¿Necesitas ayuda?</p>
+                      <p style="color:#aaa;font-size:12px;margin:4px 0;">Cosmopolitan Zona Rio (Tijuana): 664 814 1413</p>
+                      <p style="color:#aaa;font-size:12px;margin:4px 0;">Torela Agua Caliente (Tijuana): 664 815 1622</p>
+                      <p style="color:#aaa;font-size:12px;margin:4px 0;">Punta Este (Mexicali): 686 311 4648</p>
+                    </div>
+                    <p style="color:#555;font-size:11px;text-align:center;margin-top:24px;">
+                      © ${year} D Luxury Black. Todos los derechos reservados.
+                    </p>
+                  </div>
+                </div>`,
+            },
+          });
+        } catch (emailErr) {
+          console.warn('⚠️ Error enviando email de bienvenida:', emailErr);
+        }
       }
-      
+
       setIsAuthOpen(false);
     } catch (error: any) {
       console.error('❌ Error en registro:', error);

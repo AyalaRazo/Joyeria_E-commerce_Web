@@ -1,6 +1,12 @@
 import React from 'react';
+import { useSEO } from '../hooks/useSEO';
 
 const JewelryCare: React.FC = () => {
+  useSEO({
+    title: 'Cuidado de Joyas — Guía Completa',
+    description: 'Aprende cómo cuidar y limpiar tus joyas de oro, plata y diamantes para que duren toda la vida. Consejos expertos de D Luxury Black.',
+    path: '/cuidado-de-joyas',
+  });
   const tips = [
     {
       title: 'Limpieza semanal',

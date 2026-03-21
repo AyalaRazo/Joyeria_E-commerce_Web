@@ -1,7 +1,13 @@
 import React, { useState } from 'react';
 import { MessageCircle, Phone, Send, User, Mail, CheckCircle } from 'lucide-react';
+import { useSEO } from '../hooks/useSEO';
 
 const ContactPage: React.FC = () => {
+  useSEO({
+    title: 'Contacto — D Luxury Black',
+    description: 'Contáctanos por WhatsApp, teléfono o formulario. Sucursales en Tijuana y Mexicali. Atendemos consultas sobre joyería, pedidos y garantías.',
+    path: '/contacto',
+  });
   const phone = '526648141413';
   const whatsappBase = `https://wa.me/${phone}?text=`;
 

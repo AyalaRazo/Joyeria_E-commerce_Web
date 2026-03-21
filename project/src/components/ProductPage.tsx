@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { Star, ArrowLeft, Heart, X, ChevronLeft, ChevronRight, Truck, Shield, RotateCcw, ShoppingCart, Package, MapPin, ZoomIn, Lock, CreditCard } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { useCart } from '../hooks/useCart';
+import { useSEO } from '../hooks/useSEO';
 import { supabase } from '../lib/supabase';
 import type { Product, ProductVariant, Review } from '../types';
 import { buildMediaUrl, isVideoUrl } from '../utils/storage';
@@ -43,6 +44,48 @@ const ProductPage: React.FC = () => {
 
   // Configuración de tienda
   const [freeShippingThreshold, setFreeShippingThreshold] = useState(5000);
+
+  // ── SEO dinámico por producto ──────────────────────────────────────────────
+  const productSchema = product ? {
+    '@context': 'https://schema.org',
+    '@type': 'Product',
+    name: product.name,
+    description: product.description || `${product.name} — joyería artesanal de alta calidad.`,
+    image: buildMediaUrl(product.image),
+    sku: product.sku,
+    brand: { '@type': 'Brand', name: 'D Luxury Black' },
+    ...(product.avg_rating && product.review_count && product.review_count > 0 ? {
+      aggregateRating: {
+        '@type': 'AggregateRating',
+        ratingValue: product.avg_rating.toFixed(1),
+        reviewCount: product.review_count,
+        bestRating: '5',
+        worstRating: '1',
+      },
+    } : {}),
+    offers: {
+      '@type': 'Offer',
+      priceCurrency: 'MXN',
+      price: product.price.toFixed(2),
+      availability: (product.variants?.some(v => v.is_active !== false && (v.stock ?? 0) > 0))
+        ? 'https://schema.org/InStock'
+        : 'https://schema.org/OutOfStock',
+      seller: { '@type': 'Organization', name: 'D Luxury Black' },
+      url: `https://dluxuryblack.com/producto/${product.id}`,
+    },
+  } : null;
+
+  useSEO({
+    title: product?.name,
+    description: product
+      ? `${product.name} — ${product.description?.slice(0, 120) ?? 'Joyería artesanal de alta calidad'}. Precio: $${product.price.toLocaleString('es-MX')} MXN. Envío a todo México.`
+      : undefined,
+    image: product ? buildMediaUrl(product.image) : undefined,
+    path: product ? `/producto/${product.id}` : undefined,
+    type: 'product',
+    schema: productSchema,
+  });
+  // ────────────────────────────────────────────────────────────────────────────
 
   // Cargar configuración de tienda
   useEffect(() => {

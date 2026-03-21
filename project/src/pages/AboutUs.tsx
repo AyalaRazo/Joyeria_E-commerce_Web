@@ -1,5 +1,6 @@
 import React from 'react';
 import { Star, Shield, Truck, RefreshCw } from 'lucide-react';
+import { useSEO } from '../hooks/useSEO';
 
 const branches = [
   {
@@ -29,6 +30,12 @@ const branches = [
 ];
 
 const AboutUs: React.FC = () => {
+  useSEO({
+    title: 'Sobre Nosotros — Joyería D Luxury Black',
+    description: 'Conoce la historia de D Luxury Black, joyería artesanal de lujo con 3 sucursales en Tijuana y Mexicali. Diamantes, garantía y envío a todo México.',
+    path: '/sobre-nosotros',
+  });
+
   return (
     <div className="min-h-screen bg-gradient-to-b from-black via-gray-900 to-black py-16 px-4">
       <div className="max-w-5xl mx-auto space-y-12">

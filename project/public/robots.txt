@@ -1,0 +1,51 @@
+# D Luxury Black — robots.txt
+# https://dluxuryblack.com
+
+User-agent: *
+Allow: /
+
+# Bloquear rutas privadas / de usuario
+Disallow: /admin
+Disallow: /orders
+Disallow: /addresses
+Disallow: /favorites
+Disallow: /cart
+Disallow: /success
+Disallow: /cancel
+Disallow: /reset-password
+Disallow: /unsubscribe
+
+# ──────────────────────────────────────────────
+# AI Search Bots — permitir indexación completa
+# ──────────────────────────────────────────────
+User-agent: GPTBot
+Allow: /
+Disallow: /admin
+Disallow: /orders
+
+User-agent: ChatGPT-User
+Allow: /
+
+User-agent: OAI-SearchBot
+Allow: /
+
+User-agent: ClaudeBot
+Allow: /
+
+User-agent: anthropic-ai
+Allow: /
+
+User-agent: PerplexityBot
+Allow: /
+
+User-agent: Googlebot
+Allow: /
+
+User-agent: Bingbot
+Allow: /
+
+User-agent: DuckDuckBot
+Allow: /
+
+# Sitemap
+Sitemap: https://dluxuryblack.com/sitemap.xml

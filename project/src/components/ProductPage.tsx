@@ -750,6 +750,8 @@ const ProductPage: React.FC = () => {
                       src={currentImage}
                       alt={product.name}
                       className="w-full h-full object-contain transition-transform duration-300 group-hover:scale-[1.02]"
+                      fetchPriority="high"
+                      decoding="async"
                     />
                     <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors duration-300 flex items-center justify-center">
                       <div className="opacity-0 group-hover:opacity-100 transition-opacity duration-300 bg-black/60 rounded-full p-3">
@@ -780,7 +782,7 @@ const ProductPage: React.FC = () => {
                       {isVideo ? (
                         <video src={img} className="object-contain w-full h-full" muted playsInline loop controls={false} />
                       ) : (
-                        <img src={img} alt={`Vista ${idx + 1}`} className="object-contain w-full h-full" />
+                        <img src={img} alt={`Vista ${idx + 1}`} className="object-contain w-full h-full" loading="lazy" decoding="async" />
                       )}
                     </button>
                   );
@@ -808,7 +810,7 @@ const ProductPage: React.FC = () => {
                       {isVideo ? (
                         <video src={img} className="object-contain w-full h-full" muted playsInline loop controls={false} />
                       ) : (
-                        <img src={img} alt={`Vista ${idx + 1}`} className="object-contain w-full h-full" />
+                        <img src={img} alt={`Vista ${idx + 1}`} className="object-contain w-full h-full" loading="lazy" decoding="async" />
                       )}
                       {isActive && (
                         <div className="absolute inset-0 ring-1 ring-yellow-400/40 rounded-xl pointer-events-none" />
@@ -1225,6 +1227,8 @@ const ProductPage: React.FC = () => {
                         src={buildMediaUrl(relatedProduct.image)}
                         alt={relatedProduct.name}
                         className="max-h-full max-w-full object-contain transition-transform duration-300 group-hover:scale-105"
+                        loading="lazy"
+                        decoding="async"
                       />
                     )}
                     {/* Badge Nuevo */}
@@ -1507,6 +1511,7 @@ const ProductPage: React.FC = () => {
                 src={allImages[modalImageIndex]}
                 alt={`${product.name} - Vista ${modalImageIndex + 1}`}
                 className="max-w-full max-h-full object-contain"
+                decoding="async"
               />
             )}
           </div>

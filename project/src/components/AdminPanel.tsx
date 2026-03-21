@@ -2534,7 +2534,7 @@ const fetchOrderDetails = async (orderId: number) => {
                             {isVideoUrl(product.image) ? (
                               <video src={buildMediaUrl(product.image)} className="w-full h-full object-cover" muted playsInline />
                             ) : (
-                              <img src={buildMediaUrl(product.image)} alt={product.name} className="w-full h-full object-cover" onError={e => { (e.target as HTMLImageElement).src = '/default-product-image.png'; }} />
+                              <img src={buildMediaUrl(product.image)} alt={product.name} className="w-full h-full object-cover" loading="lazy" decoding="async" onError={e => { (e.target as HTMLImageElement).src = '/default-product-image.png'; }} />
                             )}
                           </div>
                           <div className="flex-1 min-w-0">
@@ -2620,7 +2620,7 @@ const fetchOrderDetails = async (orderId: number) => {
                                         {isVideoUrl(modelImage) ? (
                                           <video src={buildMediaUrl(modelImage)} className="w-full h-full object-cover" muted playsInline />
                                         ) : (
-                                          <img src={buildMediaUrl(modelImage)} alt={firstVariant?.name || product.name} className="w-full h-full object-cover" onError={e => { (e.target as HTMLImageElement).src = '/default-product-image.png'; }} />
+                                          <img src={buildMediaUrl(modelImage)} alt={firstVariant?.name || product.name} className="w-full h-full object-cover" loading="lazy" decoding="async" onError={e => { (e.target as HTMLImageElement).src = '/default-product-image.png'; }} />
                                         )}
                                       </div>
                                     )}

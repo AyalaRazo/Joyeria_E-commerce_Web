@@ -22,6 +22,8 @@ const Hero: React.FC<HeroProps> = ({ onShopNow }) => {
           src="/images/hero-jewelry.jpg"
           alt="Luxury jewelry"
           className="w-full h-full object-cover"
+          fetchPriority="high"
+          decoding="async"
         />
         <div className="absolute inset-0 bg-gradient-to-r from-black via-black/60 to-black/10" />
         <div className="absolute inset-0 bg-gradient-to-t from-black via-transparent to-black/30" />

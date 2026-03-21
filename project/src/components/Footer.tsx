@@ -35,6 +35,8 @@ const Footer: React.FC = () => {
                 src="/images/logo.png"
                 alt="D Luxury Black"
                 className="h-12 w-auto object-contain"
+                loading="lazy"
+                decoding="async"
               />
             </div>
             <p className="text-gray-300 text-xs leading-relaxed mb-3 max-w-md">

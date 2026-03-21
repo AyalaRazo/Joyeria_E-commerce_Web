@@ -1131,6 +1131,8 @@ const Checkout: React.FC<CheckoutProps> = ({
                             src={buildMediaUrl(itemImage)}
                             alt={item.name}
                             className="w-10 h-10 object-cover rounded"
+                            loading="lazy"
+                            decoding="async"
                           />
                           <div className="flex-1 min-w-0">
                             <h4 className="text-xs font-medium text-white line-clamp-2">

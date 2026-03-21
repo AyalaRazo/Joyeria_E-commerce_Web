@@ -123,6 +123,8 @@ const OrderCard: React.FC<OrderCardProps> = ({ order, compact = false }) => {
                 src={getItemImage(item)}
                 alt={item.product?.name || ''}
                 className="w-full h-full object-cover"
+                loading="lazy"
+                decoding="async"
                 onError={(e) => { (e.target as HTMLImageElement).src = '/default-product-image.png'; }}
               />
             </div>
@@ -184,6 +186,8 @@ const OrderCard: React.FC<OrderCardProps> = ({ order, compact = false }) => {
                     src={getItemImage(item)}
                     alt={item.product?.name || ''}
                     className="w-10 h-10 object-cover rounded border border-gray-700 group-hover:border-yellow-400/50 transition-colors"
+                    loading="lazy"
+                    decoding="async"
                     onError={(e) => { (e.target as HTMLImageElement).src = '/default-product-image.png'; }}
                   />
                   <div className="absolute -top-1.5 -right-1.5 bg-yellow-400 text-gray-900 text-[8px] font-bold rounded-full w-4 h-4 flex items-center justify-center border border-gray-900">

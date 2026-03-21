@@ -128,6 +128,8 @@ const Cart: React.FC<CartProps> = ({
                         src={buildMediaUrl(item.variant?.image || item.product?.image)}
                         alt={item.product?.name || 'Producto'}
                         className="w-14 h-14 object-cover rounded-md border border-gray-600"
+                        loading="lazy"
+                        decoding="async"
                         onError={(e) => {
                           const target = e.target as HTMLImageElement;
                           target.src = '/default-product-image.png';

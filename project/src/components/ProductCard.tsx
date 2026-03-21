@@ -124,6 +124,8 @@ const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
             src={displayImage}
             alt={product.name}
             className="w-full h-full object-contain transition-transform duration-500 group-hover:scale-105"
+            loading="lazy"
+            decoding="async"
           />
         )}
 

@@ -80,7 +80,7 @@ const Header: React.FC<HeaderProps> = ({
   return (
     <header className="bg-gradient-to-r from-black via-gray-900 to-black shadow-lg sticky top-0 z-50 backdrop-blur-sm bg-opacity-95">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between h-16"> {/* Cambiado de h-20 a h-16 */}
+        <div className="flex items-center justify-between h-16 relative"> {/* Cambiado de h-20 a h-16 */}
           {/* Logo - más compacto */}
           <div 
             className="flex items-center space-x-2 cursor-pointer group"  /* Reducido space-x */
@@ -98,8 +98,8 @@ const Header: React.FC<HeaderProps> = ({
             </div>
           </div>
 
-          {/* Navigation - más compacto */}
-          <nav className="hidden lg:flex space-x-4"> {/* Reducido space-x de 8 a 4 */}
+          {/* Navigation - centrado absolutamente */}
+          <nav className="hidden lg:flex space-x-4 absolute left-1/2 -translate-x-1/2">
             {categories.map((category) => (
               <button
                 key={category.id}
